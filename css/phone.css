@@ -181,3 +181,12 @@ html.rot #pad, html.rot #mg { inset: auto; top: 0; left: 0; width: 100vh; height
 .lp-nums button { border: 0; border-radius: 18px; background: var(--ink-2); color: #fff; font-family: 'Bungee', sans-serif; font-size: 40px; touch-action: none; }
 .lp-nums button.ok { background: var(--green); }
 .lp-nums button.no { background: var(--red); }
+/* Telefonata */
+.callscr { position: fixed; inset: 0; z-index: 20; background: linear-gradient(#3a4a6b, #12162a); display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 6vh 20px; touch-action: none; }
+.call-top { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.call-av { width: 84px; height: 84px; border-radius: 50%; background: #8e99b3; color: #fff; font-size: 44px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+.call-name { font-size: 34px; font-weight: 900; color: #fff; }
+.call-sub { color: #cfd6e6; font-weight: 800; }
+.call-slide { position: relative; width: min(420px, 90%); height: 70px; border-radius: 35px; background: rgba(255,255,255,0.18); display: flex; align-items: center; padding: 4px; }
+.call-slide span { position: absolute; left: 0; right: 0; text-align: center; color: #fff; font-weight: 800; pointer-events: none; }
+.call-knob { position: relative; z-index: 1; width: 62px; height: 62px; border-radius: 50%; background: #ff3b30; color: #fff; font-size: 30px; display: flex; align-items: center; justify-content: center; touch-action: none; }

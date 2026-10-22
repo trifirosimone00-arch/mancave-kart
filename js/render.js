@@ -599,11 +599,27 @@ export function createRenderer(canvas, hudRoot, track) {
     g.add(bodyM, nose, flame);
     return g;
   }
+  // macchina della polizia (carta Inseguimento) con le luci che lampeggiano
+  function makePolice() {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.7, 3), new THREE.MeshLambertMaterial({ color: '#f5f7fb' }));
+    body.position.y = 0.55;
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.25, 2.2), new THREE.MeshLambertMaterial({ color: '#1565c0' }));
+    stripe.position.y = 0.55;
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.55, 1.4), new THREE.MeshLambertMaterial({ color: '#263238' }));
+    cab.position.set(0, 1.15, -0.2);
+    const red = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.22, 0.3), new THREE.MeshBasicMaterial({ color: '#ff1744' }));
+    const blue = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.22, 0.3), new THREE.MeshBasicMaterial({ color: '#2979ff' }));
+    red.position.set(-0.3, 1.55, -0.2); blue.position.set(0.3, 1.55, -0.2);
+    g.add(body, stripe, cab, red, blue);
+    g.userData.lights = [red, blue];
+    return g;
+  }
   function syncPool(kind, list, make, place) {
     const seen = new Set();
     for (const it of list || []) {
       let m = pool[kind].get(it.id);
-      if (!m) { m = make(); scene.add(m); pool[kind].set(it.id, m); }
+      if (!m) { m = make(it); scene.add(m); pool[kind].set(it.id, m); }
       place(m, it); seen.add(it.id);
     }
     for (const [id, m] of pool[kind]) if (!seen.has(id)) { scene.remove(m); pool[kind].delete(id); }
@@ -769,7 +785,13 @@ export function createRenderer(canvas, hudRoot, track) {
     });
     syncPool('oil', snap.hazards, () => { const o = new THREE.Mesh(oilGeo, oilMat); o.rotation.x = -Math.PI / 2; return o; },
       (o, h) => o.position.set(h.x, 0.07, h.z));
-    syncPool('missile', snap.missiles, makeMissile, (o, m) => { o.position.set(m.x, 1.1, m.z); o.rotation.y = m.yaw; });
+    syncPool('missile', snap.missiles, (it) => (it.kind === 'police' ? makePolice() : makeMissile()), (o, m) => {
+      if (m.kind === 'police') {
+        o.position.set(m.x, 0, m.z); o.rotation.y = m.yaw;
+        const on = Math.sin(tsec * 18) > 0;
+        o.userData.lights[0].visible = on; o.userData.lights[1].visible = !on;
+      } else { o.position.set(m.x, 1.1, m.z); o.rotation.y = m.yaw; }
+    });
     if (feedEl) {
       const fs = (snap.feed || []).join('|');
       if (fs !== feedSig) {
@@ -807,7 +829,10 @@ export function createRenderer(canvas, hudRoot, track) {
         const back = snap.phase === 'finish' && k.finished ? 9 : 7.2;
         const camY = k.y * 0.7 + 3.1;
         v.cam.position.set(k.x - cx * back, camY, k.z - cz * back);
-        v.cam.lookAt(k.x + fx * 3.5, k.y * 0.85 + 1.6, k.z + fz * 3.5);
+        // Sbronzo: la visuale ondeggia
+        const wob = k.drunkT > 0 ? Math.min(1, k.drunkT) : 0;
+        v.cam.up.set(Math.sin(tsec * 2.6) * 0.16 * wob * cz, 1, -Math.sin(tsec * 2.6) * 0.16 * wob * cx);
+        v.cam.lookAt(k.x + fx * 3.5 + Math.sin(tsec * 1.9) * 1.2 * wob, k.y * 0.85 + 1.6, k.z + fz * 3.5 + Math.cos(tsec * 1.7) * 1.2 * wob);
         const target = k.boostT > 0 ? 84 : 72;
         v.fov += (target - v.fov) * Math.min(1, dt * 4);
         v.cam.fov = v.fov;
@@ -861,8 +886,11 @@ export function createRenderer(canvas, hudRoot, track) {
         v.fog.style.opacity = k.fogT > 0 ? Math.min(0.94, k.fogT * 0.6) : 0;
         const fx = [];
         if (k.shieldT > 0) fx.push(`Scudo ${Math.ceil(k.shieldT)}`);
-        if (k.mirror > 0) fx.push('Specchio');
-        if (k.ghostT > 0) fx.push(`Fantasma ${Math.ceil(k.ghostT)}`);
+        if (k.mirror > 0) fx.push(k.mirrorT > 0 ? `Specchio ${Math.ceil(k.mirrorT)}` : 'Specchio');
+        if (k.drunkT > 0) fx.push('Sbronzo!');
+        if (k.callT > 0) fx.push('Al telefono!');
+        if (k.slowmoT > 0) fx.push('Rallentatore');
+        if (k.copT > 0) fx.push('Fermato dalla polizia!');
         if (k.invertT > 0) fx.push('Sterzo al contrario!');
         if (k.stopT > 0) fx.push('Bloccato!');
         if (k.miniT > 0) fx.push('Mini');

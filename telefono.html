@@ -124,6 +124,10 @@
 <!-- pannelli -->
 <div id="rotate" class="cover hidden"><div><svg viewBox="0 0 24 24" width="64" height="64" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 8a8 8 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><p class="display">Gira il telefono</p><p class="muted">Tienilo in orizzontale, come un volante</p><button class="btn ghost" type="button" id="rot-ok">Ho il blocco rotazione: continua</button></div></div>
 <div id="paused" class="cover hidden"><div><p class="display big-t">PAUSA</p><p class="muted" id="paused-msg"></p><button class="btn primary" type="button" id="unpause">RIPRENDI</button></div></div>
+<div id="callscr" class="callscr hidden" aria-live="assertive">
+  <div class="call-top"><div class="call-av" id="call-av"></div><div class="call-name" id="call-name"></div><div class="call-sub">ti sta chiamando…</div></div>
+  <div class="call-slide" id="call-slide"><div class="call-knob" id="call-knob">✆</div><span>scorri per rifiutare</span></div>
+</div>
 <div id="conn" class="cover hidden"><div><p class="display">Riconnessione…</p><p class="muted" id="conn-msg">Controlla il Wi-Fi</p></div></div>
 <div id="settings" class="cover hidden"><div class="sheet">
   <p class="display">Impostazioni</p>

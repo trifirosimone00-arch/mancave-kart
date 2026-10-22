@@ -1,6 +1,6 @@
 // Audio della TV, tutto generato nel browser (niente file da scaricare, niente diritti):
-// motori stile MotoGP/F1, gomme che stridono, effetti delle carte e una musica di sottofondo
-// allegra e avventurosa, tenuta bassa sotto i motori.
+// motori morbidi da kart (stile cartone), gomme che stridono, effetti delle carte e una
+// musichetta semplice e allegra, tenuta bassa sotto i motori.
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('mck-' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -24,7 +24,7 @@ export function createAudio() {
     const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4; comp.connect(master);
     engineBus = ctx.createGain(); engineBus.gain.value = 0.9; engineBus.connect(comp);
     sfxBus = ctx.createGain(); sfxBus.gain.value = 0.55; sfxBus.connect(comp);
-    musicBus = ctx.createGain(); musicBus.gain.value = 0.16; musicBus.connect(comp);
+    musicBus = ctx.createGain(); musicBus.gain.value = 0.1; musicBus.connect(comp);
     // rumore bianco riutilizzabile
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const d = noiseBuf.getChannelData(0);
@@ -50,15 +50,17 @@ export function createAudio() {
 
   // ---------------------------------------------------------------- motori
   function makeVoice() {
-    const o1 = ctx.createOscillator(); o1.type = 'sawtooth';
-    const o2 = ctx.createOscillator(); o2.type = 'square';
-    const o3 = ctx.createOscillator(); o3.type = 'sawtooth';
-    const g2 = ctx.createGain(); g2.gain.value = 0.35;
-    const g3 = ctx.createGain(); g3.gain.value = 0.25;
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 3;
+    // kart da cartone: onda quadra morbida + ottava sotto, filtrata, con un leggero tremolio
+    const o1 = ctx.createOscillator(); o1.type = 'square';
+    const o2 = ctx.createOscillator(); o2.type = 'triangle';
+    const o3 = ctx.createOscillator(); o3.type = 'sine';      // tremolio del motore
+    const g2 = ctx.createGain(); g2.gain.value = 0.6;
+    const lfo = ctx.createGain(); lfo.gain.value = 4;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 0.8;
     const out = ctx.createGain(); out.gain.value = 0;
-    o1.connect(lp); o2.connect(g2).connect(lp); o3.connect(g3).connect(lp);
-    lp.connect(out).connect(shaper);
+    o3.frequency.value = 18; o3.connect(lfo); lfo.connect(o1.frequency); lfo.connect(o2.frequency);
+    o1.connect(lp); o2.connect(g2).connect(lp);
+    lp.connect(out).connect(engineBus);
     o1.start(); o2.start(); o3.start();
     return { o1, o2, o3, lp, out, rpm: 0, gear: 1 };
   }
@@ -82,16 +84,16 @@ export function createAudio() {
       if (!v) { v = makeVoice(); voices.set(k.slot, v); }
       const target = rpmOf(v, Math.abs(k.speed || 0)) + (k.boostT > 0 ? 0.12 : 0);
       v.rpm += (target - v.rpm) * Math.min(1, dt * (target < v.rpm ? 14 : 6));
-      const f = 70 + v.rpm * 330;                      // tono acuto, tipo MotoGP
-      v.o1.frequency.setTargetAtTime(f, t, 0.03);
-      v.o2.frequency.setTargetAtTime(f * 0.5, t, 0.03);
-      v.o3.frequency.setTargetAtTime(f * 2.01, t, 0.03);
-      v.lp.frequency.setTargetAtTime(500 + v.rpm * 2600 + (k.boostT > 0 ? 1500 : 0), t, 0.05);
+      const f = 62 + v.rpm * 175;                      // ronzio da kart, sale con le marce
+      v.o1.frequency.setTargetAtTime(f, t, 0.04);
+      v.o2.frequency.setTargetAtTime(f * 0.5, t, 0.04);
+      v.o3.frequency.setTargetAtTime(14 + v.rpm * 10, t, 0.1);
+      v.lp.frequency.setTargetAtTime(600 + v.rpm * 900 + (k.boostT > 0 ? 700 : 0), t, 0.05);
       let gain = 0;
       if (racing) {
-        if (me && k.slot === me.slot) gain = 0.16;
-        else if (me) { const d = Math.hypot(k.x - me.x, k.z - me.z); gain = 0.12 * Math.max(0, 1 - d / 70); }
-        else gain = 0.06;
+        if (me && k.slot === me.slot) gain = 0.13;
+        else if (me) { const d = Math.hypot(k.x - me.x, k.z - me.z); gain = 0.09 * Math.max(0, 1 - d / 60); }
+        else gain = 0.05;
         gain *= 0.55 + 0.45 * Math.min(1, Math.abs(k.speed || 0) / 12);
         if (k.finished && snap.phase === 'finish') gain *= 0.5;
       }
@@ -136,6 +138,8 @@ export function createAudio() {
     beep: () => tone('square', 660, 660, 0.18, 0.18),
     go: () => { tone('square', 990, 990, 0.45, 0.2); tone('square', 1320, 1320, 0.45, 0.08); },
     whistle: () => tone('sine', 2200, 500, 0.9, 0.06),                       // razzo che arriva
+    siren: () => { for (let i = 0; i < 4; i++) tone('triangle', i % 2 ? 660 : 880, i % 2 ? 660 : 880, 0.3, 0.07, i * 0.3); },
+    ring: () => { tone('sine', 1200, 1200, 0.15, 0.08); tone('sine', 1500, 1500, 0.15, 0.08, 0.18); },
     boom: () => { noise(0.6, 0.45, 2200, 80); tone('sine', 120, 40, 0.5, 0.25); },
     hit: () => { noise(0.25, 0.3, 3000, 300); tone('triangle', 300, 120, 0.2, 0.12); },
     card: () => { tone('triangle', 880, 1760, 0.12, 0.12); tone('triangle', 1320, 2640, 0.12, 0.08, 0.08); },
@@ -145,12 +149,12 @@ export function createAudio() {
   };
   function play(name) { if (ctx && FX[name]) try { FX[name](); } catch (e) { /* niente */ } }
 
-  // ---------------------------------------------------------------- musica: allegra, avventurosa, un po' da sfida
-  // giro di accordi vi-IV-I-V in La minore/Do maggiore, 150 bpm: basso, accordi a scatti e una melodia breve
-  const BPM = 150, STEP = 60 / BPM / 2;               // ottavi
-  const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];  // Am F C G
-  const MELODY = [76, 0, 74, 76, 79, 0, 76, 74, 72, 0, 74, 72, 69, 0, 72, 74,
-                  72, 0, 71, 72, 76, 0, 74, 72, 71, 0, 72, 74, 71, 67, 0, 0];
+  // ---------------------------------------------------------------- musica: semplice, allegra e chiara
+  // una sola melodia ben riconoscibile + basso morbido, in Do maggiore (Do - La- - Fa - Sol), 132 bpm
+  const BPM = 132, STEP = 60 / BPM / 2;               // ottavi
+  const BASS = [48, 45, 41, 43];                      // Do, La, Fa, Sol
+  const MELODY = [72, 76, 79, 76, 81, 79, 76, 74,  72, 74, 76, 79, 77, 76, 74, 0,
+                  69, 72, 76, 72, 77, 76, 72, 69,  71, 74, 79, 77, 76, 74, 71, 0];
   const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
   function startMusic() {
     if (music) return;
@@ -163,22 +167,14 @@ export function createAudio() {
   function note(type, midi, t, dur, vol) {
     const o = ctx.createOscillator(); o.type = type; o.frequency.value = mtof(midi);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g).connect(musicBus); o.start(t); o.stop(t + dur + 0.02);
   }
   function schedule(step, t) {
     const bar = Math.floor(step / 8) % 4, beat = step % 8;
-    const ch = CHORDS[bar];
-    // basso che spinge
-    note('triangle', ch[0] - 12, t, STEP * 0.9, beat % 2 === 0 ? 0.5 : 0.3);
-    // accordi a scatti sul contrattempo
-    if (beat % 2 === 1) for (const m of ch) note('square', m + 12, t, STEP * 0.5, 0.06);
-    // melodia (ogni 2 giri cambia ottava per non stancare)
-    const mel = MELODY[(step % 32)];
-    if (mel) note('square', mel + (Math.floor(step / 64) % 2 ? 0 : -12), t, STEP * 1.6, 0.11);
-    // batteria finta: cassa e charleston col rumore
-    if (beat % 4 === 0) { const s = ctx.createOscillator(); const g = ctx.createGain(); s.frequency.setValueAtTime(140, t); s.frequency.exponentialRampToValueAtTime(40, t + 0.12); g.gain.setValueAtTime(0.6, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15); s.connect(g).connect(musicBus); s.start(t); s.stop(t + 0.2); }
-    { const s = ctx.createBufferSource(); s.buffer = noiseBuf; const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000; const g = ctx.createGain(); g.gain.setValueAtTime(beat % 2 ? 0.08 : 0.04, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05); s.connect(hp).connect(g).connect(musicBus); s.start(t); s.stop(t + 0.06); }
+    if (beat % 2 === 0) note('triangle', BASS[bar], t, STEP * 1.8, 0.35);
+    const mel = MELODY[step % 32];
+    if (mel) note('triangle', mel, t, STEP * 1.4, 0.3);
   }
 
   // ---------------------------------------------------------------- ogni fotogramma
@@ -189,7 +185,7 @@ export function createAudio() {
     updateEngines(snap, me, dt);
     const musicOn = ['intro', 'countdown', 'race', 'pit', 'finish', 'podium'].includes(snap.phase);
     if (musicOn) startMusic(); else stopMusic();
-    musicBus.gain.setTargetAtTime(snap.phase === 'pit' || snap.phase === 'podium' ? 0.22 : 0.14, ctx.currentTime, 0.3);
+    musicBus.gain.setTargetAtTime(snap.phase === 'pit' || snap.phase === 'podium' ? 0.14 : 0.08, ctx.currentTime, 0.3);
     // conto alla rovescia
     if (snap.phase === 'countdown') {
       const n = Math.ceil(snap.countdown);
@@ -200,7 +196,7 @@ export function createAudio() {
     lastPhase = snap.phase;
     // razzi che partono
     const ms = new Set((snap.missiles || []).map(m => m.id));
-    for (const id of ms) if (!lastMissiles.has(id)) play('whistle');
+    for (const m of snap.missiles || []) if (!lastMissiles.has(m.id)) play(m.kind === 'police' ? 'siren' : 'whistle');
     lastMissiles = ms;
     // colpi
     for (const n of snap.notes || []) {

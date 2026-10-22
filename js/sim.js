@@ -23,7 +23,8 @@ export function createKart(track, slot, gridIndex, player) {
     place: gridIndex + 1, wrongWayT: 0, spinT: 0, startPress: -1,
     prevDrift: false, events: [], bumpCD: 0, grass: false,
     // effetti delle carte (secondi rimasti)
-    shieldT: 0, mirror: 0, ghostT: 0, invertT: 0, stopT: 0, miniT: 0, slowT: 0, fogT: 0, bombT: 0,
+    shieldT: 0, mirror: 0, mirrorT: 0, ghostT: 0, invertT: 0, stopT: 0, miniT: 0, slowT: 0, fogT: 0, bombT: 0,
+    drunkT: 0, callT: 0, slowmoT: 0, copT: 0,
     contacts: [], shX: 0, shZ: 0, shoveCD: 0,
   });
   return k;
@@ -45,6 +46,10 @@ export function stepKart(track, k, input, dt, phase) {
   if (k.bumpCD > 0) k.bumpCD -= dt;
   let steer = Math.max(-1, Math.min(1, input.steer || 0));
   if (k.invertT > 0) steer = -steer;
+  // Telefonata: finché non rifiuti la chiamata il kart va dritto
+  if (k.callT > 0) { steer = 0; input = { ...input, steer: 0, drift: false }; }
+  // Sbronzo: il kart sbanda un po' da solo
+  if (k.drunkT > 0) { k.drunkPh = (k.drunkPh || 0) + dt * 5.5; steer = Math.max(-1, Math.min(1, steer * 0.8 + Math.sin(k.drunkPh) * 0.32)); }
 
   if (phase === 'countdown') {
     // turbo alla partenza: premi DERAPA nell'ultimo mezzo secondo
@@ -80,6 +85,7 @@ export function stepKart(track, k, input, dt, phase) {
   if (k.speedMul) max *= k.speedMul;
   if (k.miniT > 0) max *= 0.7;
   if (k.slowT > 0) max *= 0.6;
+  if (k.slowmoT > 0) max *= 0.5;                 // Telecomando: al rallentatore
   if (k.boostT > 0) { max *= BOOST_FACTOR; k.boostT -= dt; }
   if (input.brake && !k.air) {
     if (k.speed > 0.5) k.speed -= 38 * dt;
@@ -135,7 +141,8 @@ export function stepKart(track, k, input, dt, phase) {
 
 // timer degli effetti; la bomba esplode a chi ce l'ha quando arriva a zero
 function tickEffects(k, dt) {
-  for (const f of ['shieldT', 'ghostT', 'invertT', 'stopT', 'miniT', 'slowT', 'fogT']) if (k[f] > 0) k[f] = Math.max(0, k[f] - dt);
+  for (const f of ['shieldT', 'ghostT', 'invertT', 'stopT', 'miniT', 'slowT', 'fogT', 'drunkT', 'callT', 'slowmoT', 'copT']) if (k[f] > 0) k[f] = Math.max(0, k[f] - dt);
+  if (k.mirrorT > 0) { k.mirrorT -= dt; if (k.mirrorT <= 0) { k.mirrorT = 0; k.mirror = 0; } }
   if (k.bombT > 0) {
     k.bombT -= dt;
     if (k.bombT <= 0) { k.bombT = 0; k.spinT = 2; k.speed *= 0.3; k.events.push('boom'); }

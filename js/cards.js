@@ -5,31 +5,32 @@ import { giveBoost } from './sim.js';
 // target: 'none' = su di sé / a terra, 'pick' = scegli l'avversario,
 //         'ahead' = chi è subito davanti, 'first' = chi è primo
 export const CARDS = {
-  turbo:      { name: 'Turbo',              rar: 'comune',  bad: false, target: 'none',  color: '#ff8a00', desc: 'Scatto per 2 secondi' },
-  shield:     { name: 'Scudo',              rar: 'comune',  bad: false, target: 'none',  color: '#2f7bff', desc: 'Blocca i dispetti per 20 secondi' },
+  // comuni
+  turbo:      { name: 'Turbo',              rar: 'comune',  bad: false, target: 'none',  color: '#ff8a00', desc: 'Scatto per 2 secondi · due Turbo = Super Turbo' },
+  shield:     { name: 'Scudo',              rar: 'comune',  bad: false, target: 'none',  color: '#2f7bff', desc: '10 secondi protetto da tutto, anche dall\'olio · due Scudi = Super Scudo' },
   oil:        { name: 'Olio',               rar: 'comune',  bad: true,  target: 'none',  color: '#3a3f55', desc: 'Macchia dietro di te: testacoda' },
-  missile:    { name: 'Missile',            rar: 'comune',  bad: true,  target: 'ahead', color: '#e8322b', desc: 'Insegue chi è davanti' },
-  magnet:     { name: 'Magnete',            rar: 'media',   bad: true,  target: 'ahead', color: '#c2185b', desc: 'Rubi la velocità a chi è davanti' },
-  invert:     { name: 'Sterzo al contrario', rar: 'media',  bad: true,  target: 'pick',  color: '#9b5cff', desc: 'Comandi invertiti per 5 secondi' },
-  fog:        { name: 'Nebbia',             rar: 'media',   bad: true,  target: 'pick',  color: '#78909c', desc: 'Schermo oscurato per 4 secondi' },
+  drunk:      { name: 'Sbronzo',            rar: 'comune',  bad: true,  target: 'pick',  color: '#c58b1b', desc: 'Schermo che ondeggia e kart che sbanda per 3 secondi' },
+  // medie
+  missile:    { name: 'Missile',            rar: 'media',   bad: true,  target: 'pick',  color: '#e8322b', desc: 'Scegli chi colpire, davanti o dietro' },
+  magnet:     { name: 'Magnete',            rar: 'media',   bad: true,  target: 'ahead', color: '#c2185b', desc: 'Rubi la velocità a chi è davanti (se sei primo, a chi è dietro)' },
+  invert:     { name: 'Sterzo al contrario', rar: 'media',  bad: true,  target: 'pick',  color: '#9b5cff', desc: 'Comandi invertiti per 4 secondi' },
   handbrake:  { name: 'Freno a mano',       rar: 'media',   bad: true,  target: 'pick',  color: '#6d4c41', desc: 'Lo blocchi per 2 secondi' },
   mini:       { name: 'Mini',               rar: 'media',   bad: true,  target: 'pick',  color: '#00897b', desc: 'Rimpicciolito e lento per 5 secondi' },
-  ghost:      { name: 'Fantasma',           rar: 'rara',    bad: false, target: 'none',  color: '#b0bec5', desc: '8 secondi trasparente: niente ti colpisce' },
-  swap:       { name: 'Scambio',            rar: 'rara',    bad: true,  target: 'ahead', color: '#fbc02d', desc: 'Ti scambi con chi è davanti' },
-  bomb:       { name: 'Bomba a tempo',      rar: 'rara',    bad: true,  target: 'none',  color: '#212121', desc: 'Passala toccando un kart: a ogni passaggio riparte da 10 secondi' },
-  thief:      { name: 'Ladro',              rar: 'rara',    bad: true,  target: 'pick',  color: '#5d4037', desc: 'Rubi una carta a caso' },
-  // combo (si ottengono trascinando una carta sull'altra)
+  call:       { name: 'Telefonata',         rar: 'media',   bad: true,  target: 'pick',  color: '#2e7d32', desc: 'Gli arriva una chiamata: finché non la rifiuta non può sterzare' },
+  police:     { name: 'Inseguimento',       rar: 'media',   bad: true,  target: 'pick',  color: '#1565c0', desc: 'La polizia lo insegue: se lo prende lo ferma' },
+  // rare
+  remote:     { name: 'Telecomando',        rar: 'rara',    bad: true,  target: 'all',   color: '#37474f', desc: 'Tutti gli avversari al rallentatore per 3 secondi' },
+  swap:       { name: 'Scambio',            rar: 'rara',    bad: true,  target: 'ahead', color: '#fbc02d', desc: 'Ti scambi con chi è davanti, se è entro 100 metri' },
+  thief:      { name: 'Ladro',              rar: 'rara',    bad: true,  target: 'pick',  color: '#5d4037', desc: 'Rubi una carta: va in un quarto posto in più' },
+  mirror:     { name: 'Specchio',           rar: 'rara',    bad: false, target: 'none',  color: '#90a4ae', desc: 'Per 15 secondi il prossimo dispetto torna a chi l\'ha lanciato' },
+  // combo (tasto COMBO quando hai due carte uguali)
   superturbo: { name: 'Super Turbo',        rar: 'combo',   bad: false, target: 'none',  color: '#ff5a00', desc: 'Un turbo unico da 5 secondi' },
-  missile1:   { name: 'Missile al primo',   rar: 'combo',   bad: true,  target: 'first', color: '#b71c1c', desc: 'Ferma il primo e gli fa perdere una carta' },
-  trap:       { name: 'Trappola invisibile', rar: 'combo',  bad: true,  target: 'none',  color: '#263238', desc: 'Olio che nessuno vede' },
-  mirror:     { name: 'Specchio',           rar: 'combo',   bad: false, target: 'none',  color: '#cfd8dc', desc: 'Rimanda indietro il prossimo dispetto' },
+  supershield:{ name: 'Super Scudo',        rar: 'combo',   bad: false, target: 'none',  color: '#0d47a1', desc: '20 secondi protetto da tutto' },
 };
 
 export const COMBOS = {
   'turbo+turbo': 'superturbo',
-  'missile+missile': 'missile1',
-  'fog+oil': 'trap',
-  'shield+shield': 'mirror',
+  'shield+shield': 'supershield',
 };
 export function comboOf(a, b) { return COMBOS[[a, b].sort().join('+')] || null; }
 
@@ -38,11 +39,11 @@ export const COOLDOWN = 5;          // secondi tra una carta e l'altra
 export const PORTAL_COOLDOWN = 3;   // il portale si spegne dopo che qualcuno pesca
 export const PORTAL_FRACTIONS = [0.18, 0.47, 0.76]; // 3 portali per giro
 
-// rarità: le rare escono davvero poco (1-2 a gara)
+// rarità: le rare escono poco
 const POOL = [
-  ...['turbo', 'shield', 'oil', 'missile'].map(id => [id, 15]),
-  ...['magnet', 'invert', 'fog', 'handbrake', 'mini'].map(id => [id, 7.2]),
-  ...['ghost', 'swap', 'bomb', 'thief'].map(id => [id, 3.5]),
+  ...['turbo', 'shield', 'oil', 'drunk'].map(id => [id, 15]),
+  ...['missile', 'magnet', 'invert', 'handbrake', 'mini', 'call', 'police'].map(id => [id, 5.2]),
+  ...['remote', 'swap', 'thief', 'mirror'].map(id => [id, 3.5]),
 ];
 // rareMul > 1: più probabilità di carte rare (premio del pit stop)
 export function drawCard(rand = Math.random, rareMul = 1) {
@@ -56,20 +57,19 @@ export function drawCard(rand = Math.random, rareMul = 1) {
 // Ritorna 'blocked' | 'mirror' | 'ok'.
 export function receive(k, kind) {
   const bad = !['give'].includes(kind);
-  if (bad && k.ghostT > 0) return 'blocked';
-  if (bad && k.mirror > 0) { k.mirror = 0; return 'mirror'; }
+  if (bad && k.mirror > 0) { k.mirror = 0; k.mirrorT = 0; return 'mirror'; }
   if (bad && k.shieldT > 0) return 'blocked';
   switch (kind) {
     case 'missile': k.spinT = Math.max(k.spinT, 1.2); k.speed *= 0.4; break;
-    case 'missile1': k.stopT = Math.max(k.stopT, 2); break;
     case 'oil': k.spinT = Math.max(k.spinT, 1); break;
-    case 'trap': k.spinT = Math.max(k.spinT, 2); break;
-    case 'invert': k.invertT = 5; break;
-    case 'fog': k.fogT = 4; break;
+    case 'drunk': k.drunkT = 3; break;
+    case 'invert': k.invertT = 4; break;
     case 'handbrake': k.stopT = Math.max(k.stopT, 2); break;
     case 'mini': k.miniT = 5; break;
     case 'slow': k.slowT = 3; break;
-    case 'bomb': break; // gestita a parte (si passa il tempo rimasto)
+    case 'call': k.callT = 8; break;                        // finisce prima, appena rifiuta la chiamata
+    case 'police': k.stopT = Math.max(k.stopT, 1.5); k.copT = 2; break;
+    case 'remote': k.slowmoT = 3; break;
   }
   return 'ok';
 }
@@ -79,11 +79,10 @@ export function applySelf(k, id) {
   switch (id) {
     case 'turbo': giveBoost(k, 2, 'orange'); return true;
     case 'superturbo': giveBoost(k, 5, 'orange'); return true;
-    case 'shield': k.shieldT = 20; return true;
-    case 'mirror': k.mirror = 1; return true;
-    case 'ghost': k.ghostT = 8; return true;
+    case 'shield': k.shieldT = 10; return true;
+    case 'supershield': k.shieldT = 20; return true;
+    case 'mirror': k.mirror = 1; k.mirrorT = 15; return true;
     case 'magnet': giveBoost(k, 3, 'blue'); return true;
-    case 'bomb': k.bombT = 10; return true;
   }
   return false;
 }

@@ -28,6 +28,7 @@ const INTRO_TIME = 5;
 const COUNTDOWN = 3.2;
 const AFTER_FIRST = 30;
 const DT = 1 / 60;
+const SWAP_RANGE = 100;      // metri massimi per lo Scambio
 const BOMB_TIME = 10;        // a ogni passaggio la bomba riparte da qui
 const BOMB_HOLD = 2;         // secondi prima di poterla ripassare
 const NET_MS = 33;           // ~30 aggiornamenti di rete al secondo
@@ -197,6 +198,7 @@ function onPhoneMsg(conn, msg) {
     case 'mg': if (W.pit && msg.s && typeof msg.s === 'object' && msg.s.id === W.pit.id && JSON.stringify(msg.s).length < 3000) l.mg = msg.s; break;
     case 'offer': pickOffer(l.slot, msg.pick); break;
     case 'pitskip': command(l.slot, { t: 'pitskip', id: msg.id, stage: msg.stage }); break;
+    case 'callend': { const k = karts.get(l.slot); if (k && k.callT > 0) { k.callT = 0; pushStatus(true); } break; }
     case 'lampo': if (W.lampo && msg.id === W.lampo.id) toMaster({ t: 'lampo', slot: l.slot, id: msg.id }); break;
     case 'leave':
       command(l.slot, { t: 'leave' });
@@ -249,6 +251,7 @@ function pushStatus(force) {
       finished: k ? k.finished : false, air: k ? k.air : false,
       results: W.phase === 'podium' ? W.results : undefined,
       pit: pitInfo(l.slot), offer: offerInfo(l.slot), lampo: lampoInfo(l.slot),
+      call: k && k.callT > 0 ? { from: nameOf(k.callFrom) } : null, cop: !!(k && k.copT > 0), drunk: !!(k && k.drunkT > 0),
       hand: handInfo(l.slot), others: W.players.filter(p => p.slot !== l.slot).map(p => ({ slot: p.slot, name: p.name, color: p.color, place: placeOf(p.slot) })),
     });
   }
@@ -623,6 +626,7 @@ function simStep() {
       if (!l) { others.push(k); continue; }
       mine.push(k);
       if (lampoLocal(k)) { k.speed = 0; k.stopT = Math.max(k.stopT || 0, 0.1); k.drifting = false; }
+      if (k.callT > 0 && isBot(l)) { k.callBot = (k.callBot || 0) + DT; if (k.callBot > 0.9) k.callT = 0; }
       stepKart(track, k, l.input, DT, 'race');
       l.input.trick = false;
       if (!k.finished && k.lapCount > W.laps) {
@@ -670,6 +674,7 @@ function compact(k) {
     driftCharge: r2(k.driftCharge), boostT: r2(k.boostT), boostKind: k.boostKind, trickT: r2(k.trickT), spinT: r2(k.spinT),
     place: k.place, lapCount: k.lapCount, finished: k.finished, finishTime: r2(k.finishTime || 0), wrongWay: r2(k.wrongWayT),
     shieldT: r2(k.shieldT), mirror: k.mirror, ghostT: r2(k.ghostT), miniT: r2(k.miniT), bombT: r2(k.bombT), fogT: r2(k.fogT), invertT: r2(k.invertT), stopT: r2(k.stopT),
+    drunkT: r2(k.drunkT), callT: r2(k.callT), slowmoT: r2(k.slowmoT), copT: r2(k.copT), mirrorT: r2(k.mirrorT),
   };
 }
 function worldMsg() {
@@ -764,10 +769,10 @@ function handInfo(slot) {
   return { cards: h.cards, cd: Math.max(0, Math.round(h.cd * 10) / 10) };
 }
 
-function addCard(slot, id) {
+function addCard(slot, id, extra = false) {
   if (!isLocalSlot(slot) || !CARDS[id]) return;
   const h = handOf(slot);
-  if (h.cards.length >= HAND_SIZE) return;   // mano piena: la carta va persa
+  if (h.cards.length >= HAND_SIZE + (extra ? 1 : 0)) return;   // mano piena: la carta va persa (il Ladro dà un quarto posto)
   h.cards.push(id);
   audio.play('card');
   vibrate(slot, [30, 40, 30]);
@@ -793,6 +798,14 @@ function useCard(slot, i, to) {
   if (!id) return;
   const def = CARDS[id];
   if (def.target === 'pick' && (to == null || to === slot || !regBySlot(to))) return;
+  if (id === 'swap') {
+    // lo Scambio funziona solo se chi ti sta davanti è entro 100 metri (altrimenti la carta resta in mano)
+    const me = placeOf(slot);
+    const ahead = W.players.find(p => placeOf(p.slot) === me - 1);
+    const t = ahead ? karts.get(ahead.slot) : null;
+    const gap = t ? raceDistance(track, t) - raceDistance(track, k) : Infinity;
+    if (!(gap >= 0 && gap <= SWAP_RANGE)) { addNote(slot, 'SCAMBIO: troppo lontano!', 'bad'); vibrate(slot, [10, 40, 10]); return; }
+  }
   h.cards.splice(i, 1);
   h.cd = COOLDOWN;
   vibrate(slot, [20]);
@@ -823,6 +836,12 @@ function targetAhead(from) {
   const t = [...karts.values()].find(q => q.place === k.place - 1);
   return t ? t.slot : null;
 }
+function targetBehind(from) {
+  const k = karts.get(from);
+  if (!k) return null;
+  const t = [...karts.values()].find(q => q.place === k.place + 1);
+  return t ? t.slot : null;
+}
 function targetFirst(from) {
   const t = [...karts.values()].find(q => q.place === 1);
   return t && t.slot !== from ? t.slot : null;
@@ -849,22 +868,29 @@ function onMasterCmd(msg, sid) {
       if (!owns(msg.from) || !CARDS[msg.card]) return;
       const def = CARDS[msg.card], from = msg.from;
       let to = msg.to;
-      if (def.target === 'ahead') to = targetAhead(from);
+      if (def.target === 'ahead') { to = targetAhead(from); if (to == null && msg.card === 'magnet') to = targetBehind(from); }
       if (def.target === 'first') to = targetFirst(from);
-      pushFeed(`${nameOf(from)}: ${def.name.toUpperCase()}${to != null && def.target !== 'none' ? ' → ' + nameOf(to) : ''}`);
+      pushFeed(`${nameOf(from)}: ${def.name.toUpperCase()}${to != null && def.target !== 'none' ? ' → ' + nameOf(to) : def.target === 'all' ? ' → TUTTI' : ''}`);
       switch (msg.card) {
-        case 'missile': case 'missile1': {
-          const k = karts.get(from);
+        case 'missile': case 'police': {
+          // parte verso il bersaglio: avanti se è davanti, indietro se è dietro
+          const k = karts.get(from), t = to != null ? karts.get(to) : null;
           if (!k) return;
-          W.missiles.push({ id: ++fxId, from, to, kind: msg.card, s: k.s + 3, lat: k.lat, life: to == null ? 2.5 : 12, x: k.x, z: k.z, yaw: k.yaw });
+          const dir = t && raceDistance(track, t) < raceDistance(track, k) ? -1 : 1;
+          const police = msg.card === 'police';
+          W.missiles.push({ id: ++fxId, from, to, kind: msg.card, dir, s: (k.s + 3 * dir + track.length) % track.length, lat: k.lat,
+            life: police ? 7 : (to == null ? 2.5 : 12), speed: police ? 33 : 52, x: k.x, z: k.z, yaw: k.yaw });
           break;
         }
-        case 'oil': case 'trap':
+        case 'oil':
           if (msg.pos) W.hazards.push({ id: ++fxId, kind: msg.card, x: msg.pos.x, z: msg.pos.z, owner: from, born: W.raceTime });
           break;
         case 'magnet': if (to != null) sendFx(to, from, 'slow'); break;
-        case 'invert': case 'fog': case 'handbrake': case 'mini': case 'thief':
+        case 'drunk': case 'invert': case 'handbrake': case 'mini': case 'thief': case 'call':
           if (to != null) sendFx(to, from, msg.card);
+          break;
+        case 'remote':
+          for (const p of W.players) if (p.slot !== from) sendFx(p.slot, from, 'remote');
           break;
         case 'swap': {
           if (to == null) break;
@@ -894,7 +920,7 @@ function onMasterCmd(msg, sid) {
       if (st2) toStation(st2, { t: 'hitnote', slot: msg.from, name: nameOf(msg.to) });
       break;
     }
-    case 'give': if (owns(msg.from)) { const st = stationOf(msg.to); if (st) toStation(st, { t: 'card', slot: msg.to, card: msg.card }); } break;
+    case 'give': if (owns(msg.from)) { const st = stationOf(msg.to); if (st) toStation(st, { t: 'card', slot: msg.to, card: msg.card, extra: true }); } break;
     case 'bomb': if (owns(msg.from)) sendFx(msg.to, msg.from, 'bomb', { left: msg.left }); break;
     case 'hazard-hit': W.hazards = W.hazards.filter(h => h.id !== msg.id); break;
     case 'feed': pushFeed(String(msg.text || '').slice(0, 80)); break;
@@ -905,15 +931,17 @@ function masterCardsStep() {
   const L = track.length;
   for (const m of W.missiles) {
     m.life -= DT;
-    m.s = (m.s + 52 * DT) % L;
+    const dir = m.dir || 1;
+    m.s = (m.s + dir * (m.speed || 52) * DT + L) % L;
     const t = m.to != null ? karts.get(m.to) : null;
     if (t) {
       m.lat += (t.lat - m.lat) * Math.min(1, DT * 3);
-      const d = (t.s - m.s + L) % L;
-      if (d < 2.5 || d > L - 4) { sendFx(m.to, m.from, m.kind); m.life = 0; }
+      const d = dir > 0 ? (t.s - m.s + L) % L : (m.s - t.s + L) % L;
+      if (d < 2.5 || d > L - 4) { sendFx(m.to, m.from, m.kind); m.life = 0; m.hit = true; }
     }
+    if (m.life <= 0 && !m.hit && m.kind === 'police' && m.to != null) pushFeed(`${nameOf(m.to)} è scappato alla polizia!`);
     const p = track.pts[Math.floor(m.s / track.ds) % track.count];
-    m.x = p.x + p.rx * m.lat; m.z = p.z + p.rz * m.lat; m.yaw = Math.atan2(p.tx, p.tz);
+    m.x = p.x + p.rx * m.lat; m.z = p.z + p.rz * m.lat; m.yaw = Math.atan2(p.tx, p.tz) + (dir < 0 ? Math.PI : 0);
   }
   W.missiles = W.missiles.filter(m => m.life > 0);
   W.hazards = W.hazards.filter(h => W.raceTime - h.born < 25);
@@ -928,7 +956,7 @@ function onStationCmd(msg) {
       addNote(msg.slot, `COLPITO: ${msg.name}`, 'ok');
       vibrate(msg.slot, [30, 40, 30, 40, 90]);
       break;
-    case 'card': addCard(msg.slot, msg.card); break;
+    case 'card': addCard(msg.slot, msg.card, !!msg.extra); break;
     case 'fx': {
       const k = karts.get(msg.to);
       if (!k || !isLocalSlot(msg.to)) return;
@@ -951,7 +979,8 @@ function onStationCmd(msg) {
       }
       const r = receive(k, msg.kind);
       if (r !== 'ok') { toMaster({ t: 'result', to: msg.to, from: msg.from, kind: msg.kind, res: r, data: msg.data }); return; }
-      vibrate(msg.to, [150]);
+      vibrate(msg.to, msg.kind === 'call' ? [400, 200, 400, 200, 400] : [150]);
+      if (msg.kind === 'call') { k.callFrom = msg.from; k.callBot = 0; }
       gotHit(msg.to, msg.from);
       if (msg.kind === 'thief' || msg.kind === 'missile1') {
         const h = hands.get(msg.to);
@@ -984,7 +1013,7 @@ function cardsStep(mine, now) {
   const L = track.length;
   for (const k of mine) {
     const h = handOf(k.slot);
-    if (h.cd > 0) h.cd = Math.max(0, h.cd - DT);
+    if (h.cd > 0) h.cd = Math.max(0, h.cd - DT * (k.slowmoT > 0 ? 0.5 : 1));   // Telecomando: anche la ricarica va piano
     // portali: passo sopra → chiedo una carta (decide il PC principale chi è arrivato prima)
     if (k.lapCount >= 1 && !k.finished) {
       PORTAL_FRACTIONS.forEach((f, pi) => {

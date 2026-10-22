@@ -256,10 +256,12 @@ function onStatus(s) {
   let msg = '';
   if (s.phase === 'intro') msg = 'Si parte! Premi DERAPA per saltare il giro di pista';
   else if (s.phase === 'countdown') msg = 'Premi DERAPA appena prima del VIA per il turbo!';
+  else if (s.cop) msg = 'Documenti, prego!';
   else if (s.finished) msg = 'Traguardo!';
   else if (s.air) msg = 'Scuoti il telefono!';
   $('p-msg').textContent = msg;
   drawHand(s);
+  drawCall(s);
   $('paused').classList.toggle('hidden', !(s.paused && racing));
   $('paused-msg').textContent = s.pauseMsg || '';
   // fine
@@ -398,7 +400,7 @@ function drawHand(s) {
   if (sig === handSig) return;
   handSig = sig;
   el.innerHTML = '';
-  for (let i = 0; i < HAND_SIZE; i++) {
+  for (let i = 0; i < Math.max(HAND_SIZE, h.cards.length); i++) {
     const id = h.cards[i];
     const c = document.createElement('button');
     c.type = 'button';
@@ -482,5 +484,44 @@ function closePick() {
   box.classList.add('hidden'); box.dataset.sig = '';
   $('pad').classList.remove('picking');
 }
+// Telefonata: schermata di chiamata, si rifiuta facendo scorrere il dito
+let callOn = false, callEndAt = 0, ringT = null;
+function drawCall(s) {
+  const on = !!(s.call && s.phase === 'race');
+  if (on && !callOn) {
+    $('call-name').textContent = s.call.from;
+    $('call-av').textContent = (s.call.from || '?').slice(0, 1).toUpperCase();
+    $('call-knob').style.transform = '';
+    $('callscr').classList.remove('hidden');
+    closePick();
+    const ring = () => { if (navigator.vibrate) navigator.vibrate([500, 300]); };
+    ring(); ringT = setInterval(ring, 800);
+  }
+  if (!on && callOn) { $('callscr').classList.add('hidden'); clearInterval(ringT); if (navigator.vibrate) navigator.vibrate(0); }
+  callOn = on;
+}
+(() => {
+  const knob = $('call-knob'), track = $('call-slide');
+  let sx = null;
+  knob.addEventListener('pointerdown', (e) => { e.preventDefault(); sx = e.clientX; try { knob.setPointerCapture(e.pointerId); } catch (err) { /* niente */ } });
+  knob.addEventListener('pointermove', (e) => {
+    if (sx == null) return;
+    const max = track.clientWidth - knob.offsetWidth - 8;
+    const dx = Math.max(0, Math.min(max, e.clientX - sx));
+    knob.style.transform = `translateX(${dx}px)`;
+    if (dx >= max * 0.85) { sx = null; endCall(); }
+  });
+  const up = () => { if (sx != null) { sx = null; knob.style.transform = ''; } };
+  knob.addEventListener('pointerup', up); knob.addEventListener('pointercancel', up);
+})();
+function endCall() {
+  callEndAt = performance.now();
+  send2({ t: 'callend' });
+  $('callscr').classList.add('hidden');
+  clearInterval(ringT); if (navigator.vibrate) navigator.vibrate(0);
+}
+// rimando "chiudi chiamata" finché lo schermo non conferma (la rete può perdere un messaggio)
+setInterval(() => { if (callOn && callEndAt && performance.now() - callEndAt < 3000) send2({ t: 'callend' }); }, 300);
+
 // la scelta si chiude da sola se non scegli
 setInterval(() => { if (picking && performance.now() - pickT > 7000) closePick(); }, 500);

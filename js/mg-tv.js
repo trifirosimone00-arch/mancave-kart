@@ -1,5 +1,5 @@
 // Pit stop sulla TV: spiegazione, gioco in corso, classifica e premi.
-import { GAMES, PIT_INTRO, PIT_GO, quizRound } from './minigames.js';
+import { GAMES, PIT_INTRO, PIT_GO, TIE_INTRO, TIE_TAP, SEM_READY, SEM_FOUL, semDelay, DUEL_NAMES } from './minigames.js';
 
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const DOOR_COLORS = ['#e8322b', '#2f7bff', '#2ec46b'];
@@ -23,14 +23,34 @@ export function drawPit(el, P, players) {
     timer = `<div class="pit-timer"><b>${Math.max(1, Math.ceil(PIT_INTRO - P.stageT))}</b><span>si comincia</span></div>`;
     body = `<p class="pit-help">${esc(g.help)}</p><p class="pit-sub">Si gioca col telefono</p>`;
   } else if (P.stage === 'play') {
-    if (g.rounds) {
+    if (g.duel) {
+      timer = `<div class="pit-timer"><b>${P.round + 1}</b><span>manche</span></div>`;
+    } else if (g.rounds) {
       const left = P.reveal == null ? g.roundTime - P.roundT : 0;
-      timer = `<div class="pit-timer"><b>${P.reveal == null ? Math.ceil(Math.max(0, left)) : '!'}</b><span>${P.game === 'quiz' ? 'domanda' : 'manche'} ${P.round + 1}/${g.rounds}</span></div>`;
+      timer = `<div class="pit-timer"><b>${P.reveal == null ? Math.ceil(Math.max(0, left)) : '!'}</b><span>${P.game === 'quiz' ? 'domanda' : 'manche'} ${P.round + 1}/${P.rounds || g.rounds}</span></div>`;
     } else {
       timer = `<div class="pit-timer"><b>${clock(P.dur - P.t)}</b><span>tempo</span></div>`;
     }
-    if (P.game === 'quiz' && P.round >= 0) {
-      const q = quizRound(P.seed, P.round);
+    if (P.game === 'semaforo' && P.duel) {
+      const t = P.roundT - SEM_READY, d = semDelay(P.seed, P.round);
+      const light = P.reveal ? 'off' : t < 0 ? 'off' : t < d ? 'red' : 'green';
+      body += `<div class="sem-tv"><div class="sem-lamp ${light}"><i></i><i></i><i></i></div><div class="duels">`;
+      const res = P.reveal ? P.reveal.res : null;
+      const pairs = res ? res : P.duel.pairs.filter(p => p.w == null).map(p => ({ a: p.a, b: p.b, kind: p.kind, sa: p.sa, sb: p.sb }));
+      const ms = (v) => v >= SEM_FOUL ? (v === SEM_FOUL ? 'anticipo!' : '—') : `${v} ms`;
+      for (const p of pairs) {
+        const full = P.duel.pairs.find(q => (q.a === p.a && q.b === p.b)) || null;
+        body += `<div class="duel"><div class="duel-k">${esc(DUEL_NAMES[p.kind] || '')}</div>`
+          + `<div class="duel-p ${res && p.w === p.a ? 'win' : ''}" style="--c:${esc(who(p.a).color)}"><b>${esc(who(p.a).name)}</b><span>${res ? ms(p.ma) : full ? full.sa : ''}</span></div>`
+          + '<div class="duel-vs">VS</div>'
+          + `<div class="duel-p ${res && p.w === p.b ? 'win' : ''}" style="--c:${esc(who(p.b).color)}"><b>${esc(who(p.b).name)}</b><span>${res ? ms(p.mb) : full ? full.sb : ''}</span></div></div>`;
+      }
+      if (P.duel.bye != null && P.duel.phase === 1) body += `<div class="duel bye">${esc(who(P.duel.bye).name)} aspetta in finale</div>`;
+      body += '</div></div>';
+      if (!res) body += '<p class="pit-sub">Chi tocca prima del verde perde la manche</p>';
+    }
+    if (P.game === 'quiz' && P.round >= 0 && P.qs) {
+      const q = P.qs[P.round];
       const picks = (P.reveal && P.reveal.picks) || {};
       body += `<div class="quiz"><div class="quiz-cat">${esc(q.cat)}</div><div class="quiz-q">${esc(q.q)}</div><div class="quiz-a">`;
       q.answers.forEach((a, i) => {
@@ -58,12 +78,22 @@ export function drawPit(el, P, players) {
         + `<div class="pl-bar"><i style="width:${Math.round((r.bar || 0) * 100)}%"></i></div><div class="pl-l">${esc(r.label)}</div></div>`;
     }
     body += '</div>';
+  } else if (P.stage === 'tie') {
+    const tapping = P.stageT >= TIE_INTRO;
+    timer = `<div class="pit-timer"><b>${tapping ? Math.max(0, Math.ceil(TIE_INTRO + TIE_TAP - P.stageT)) : '!'}</b><span>spareggio</span></div>`;
+    body += `<p class="pit-help">${tapping ? 'TOCCA A RAFFICA!' : 'Pari merito! Spareggio lampo: 5 secondi di tap'}</p><div class="pit-live">`;
+    const max = Math.max(10, ...Object.values(P.tieLive || {}));
+    for (const slot of P.tie.slots) {
+      const p = who(slot), n = (P.tieLive || {})[slot] || 0;
+      body += `<div class="pl" style="--c:${esc(p.color)}"><div class="pl-n">${esc(p.name)}</div><div class="pl-bar"><i style="width:${Math.round(100 * n / max)}%"></i></div><div class="pl-l">${n} tap</div></div>`;
+    }
+    body += '</div>';
   } else if (P.stage === 'results' || P.stage === 'go' || P.stage === 'done') {
     if (P.stage === 'go' || P.stage === 'done') timer = `<div class="pit-timer go"><b>${Math.max(1, Math.ceil(PIT_GO - P.stageT))}</b><span>si riparte</span></div>`;
     body += '<div class="pit-res">';
     for (const r of P.results || []) {
       const p = who(r.slot);
-      body += `<div class="pr p${r.place}" style="--c:${esc(p.color)}"><div class="pr-pl">${r.place}°</div><div class="pr-n">${esc(p.name)}<small>${esc(r.label)}</small></div><div class="pr-prize">${esc(r.prize.text)}</div></div>`;
+      body += `<div class="pr p${r.place}" style="--c:${esc(p.color)}"><div class="pr-pl">${r.place}°</div><div class="pr-n">${esc(p.name)}<small>${esc(r.label)}${r.tie != null ? ` · spareggio ${r.tie} tap` : ''}</small></div><div class="pr-prize">${esc(r.prize.text)}</div></div>`;
     }
     body += '</div><p class="pit-sub">Chi ha vinto sceglie le carte sul telefono</p>';
   }

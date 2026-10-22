@@ -140,3 +140,10 @@ input[type="range"] { width: 100%; height: 36px; }
 .mg-offer .display { margin: 0; font-size: 26px; }
 .offer-cards { display: flex; gap: 12px; }
 .offer-cards .card { cursor: pointer; }
+.sink { position: relative; width: 100%; height: 90px; border-radius: 45px; background: linear-gradient(#bfe6ff, #6fbbe8); border: 5px solid #e8ecf5; overflow: hidden; }
+.sink .boat { position: absolute; left: 0; top: 50%; transform: translateY(-55%); font-size: 52px; font-style: normal; transition: left 0.1s linear; }
+.sink .flag { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 36px; font-style: normal; }
+.maze { flex: 2.4; min-width: 0; height: 100%; touch-action: none; }
+.maze-side { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; }
+.maze-side .btn { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+#mg-tie.go { background: var(--green); box-shadow: 0 8px 0 #1a7a42; }

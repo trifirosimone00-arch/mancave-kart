@@ -10,7 +10,10 @@ import { createRenderer } from './render.js';
 import { createScreenConfig, bindLayoutButtons, bindScreenBar } from './screen-ui.js';
 import { iceServers, PEER_PREFIX, hasTurn } from './net.js';
 import { CPU_LEVELS, CPU_NAMES, newBrain, cpuInput } from './ai.js';
-import { PIT_FRACTION, PIT_INTRO, PIT_RESULTS, PIT_GO, pitLaps, GAMES, GAME_IDS, gameDuration, rankGame, liveLabel, liveBar, prizeFor, cpuMgNew, cpuMgTick, quizRound } from './minigames.js';
+import {
+  PIT_FRACTION, PIT_INTRO, PIT_RESULTS, PIT_GO, TIE_INTRO, TIE_TAP, pitLaps, GAMES, GAME_IDS, gameDuration, gameRounds, rankGame, tieGroups, applyTie,
+  liveLabel, liveBar, prizeFor, cpuMgNew, cpuMgTick, buildQuiz, duelStart, duelRound, duelPairOf, semRoundTime, QUIZ_CATS,
+} from './minigames.js';
 import { drawPit } from './mg-tv.js';
 
 const $ = (id) => document.getElementById(id);
@@ -50,6 +53,8 @@ const W = {                       // stato della stanza (sul PC principale è la
   portals: PORTAL_FRACTIONS.map(() => 0), hazards: [], missiles: [], feed: [],
   pit: null, pitsDone: 0, pitUsed: [],
 };
+W.mgShort = !!store.get('mg-short', false);
+W.quizCats = (store.get('quiz-cats', QUIZ_CATS) || []).filter(c => QUIZ_CATS.includes(c));
 let pauseAuto = false, resumeT = 0, firstFinishAt = -1, finishT = 0;
 let worldAt = 0;                  // (schermo collegato) quando è arrivato l'ultimo stato
 let currentRace = 0;              // gara per cui ho creato i kart
@@ -976,7 +981,7 @@ function onPhaseChange() {
 let lobbySig = '';
 let cpuLevel = CPU_LEVELS[store.get('cpu-level', 'normale')] ? store.get('cpu-level', 'normale') : 'normale';
 function drawLobby() {
-  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel]);
+  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel, W.mgShort, W.quizCats]);
   if (sig === lobbySig) return;
   lobbySig = sig;
   const el = $('players');
@@ -1026,6 +1031,8 @@ function drawLobby() {
   $('wait-start').classList.toggle('hidden', MASTER);
   $('kbd').textContent = locals.has('kbd-' + myId) ? 'Togli la tastiera' : 'Prova con la tastiera';
   $('cpu-box').classList.toggle('hidden', !MASTER);
+  $('mg-settings').classList.toggle('hidden', !MASTER);
+  drawMgSettings();
   $('cpu-add').disabled = W.players.length >= MAX_PLAYERS;
   $('cpu-add').textContent = W.players.length >= MAX_PLAYERS ? 'Stanza piena' : '+ Aggiungi computer';
   const lv = $('cpu-level');
@@ -1092,6 +1099,64 @@ $('kbd').onclick = () => {
   }
   lobbySig = ''; drawLobby();
 };
+// impostazioni dei minigiochi e domande Mancave (solo PC principale, salvate qui)
+function drawMgSettings() {
+  const len = $('mg-len');
+  len.innerHTML = '';
+  for (const [v, t] of [[false, '1 minuto'], [true, '30 secondi']]) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = t; b.className = W.mgShort === v ? 'on' : '';
+    b.onclick = () => { W.mgShort = v; store.set('mg-short', v); lobbySig = ''; drawLobby(); };
+    len.appendChild(b);
+  }
+  const cats = $('quiz-cats');
+  cats.innerHTML = '';
+  const short = { 'Cultura': 'Cultura', 'Calcio': 'Calcio', 'Videogiochi e film': 'Giochi e film', 'Mancave': 'Mancave' };
+  for (const c of QUIZ_CATS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = short[c]; b.className = W.quizCats.includes(c) ? 'on' : '';
+    b.setAttribute('aria-pressed', W.quizCats.includes(c));
+    b.onclick = () => {
+      const on = W.quizCats.includes(c);
+      if (on && W.quizCats.length === 1) return;          // almeno una categoria
+      W.quizCats = on ? W.quizCats.filter(x => x !== c) : [...W.quizCats, c];
+      store.set('quiz-cats', W.quizCats); lobbySig = ''; drawLobby();
+    };
+    cats.appendChild(b);
+  }
+  $('mq-open').textContent = `Modifica (${store.get('mancave-q', []).length})`;
+}
+function drawMq() {
+  const list = store.get('mancave-q', []);
+  const el = $('mq-list');
+  el.innerHTML = list.length ? '' : '<p class="mq-empty">Ancora nessuna domanda: aggiungi la prima qui sopra.</p>';
+  list.forEach((q, i) => {
+    const d = document.createElement('div');
+    d.className = 'mq-item';
+    d.innerHTML = '<div><b></b><small><i></i> · <span></span></small></div><button type="button" aria-label="Togli la domanda">×</button>';
+    d.querySelector('b').textContent = q.q;
+    d.querySelector('i').textContent = q.a[0];
+    d.querySelector('span').textContent = q.a.slice(1).join(' · ');
+    d.querySelector('button').onclick = () => { const l = store.get('mancave-q', []); l.splice(i, 1); store.set('mancave-q', l); drawMq(); lobbySig = ''; drawLobby(); };
+    el.appendChild(d);
+  });
+}
+$('mq-open').onclick = () => { $('mq').classList.remove('hidden'); drawMq(); $('mq-q').focus(); };
+$('mq-close').onclick = () => $('mq').classList.add('hidden');
+$('mq-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = $('mq-q').value.trim();
+  const a = [0, 1, 2, 3].map(i => $('mq-a' + i).value.trim());
+  if (!q || a.some(x => !x)) return;
+  const l = store.get('mancave-q', []);
+  l.push({ q: q.slice(0, 120), a: a.map(x => x.slice(0, 40)) });
+  store.set('mancave-q', l);
+  for (const id of ['mq-q', 'mq-a0', 'mq-a1', 'mq-a2', 'mq-a3']) $(id).value = '';
+  if (!W.quizCats.includes('Mancave')) { W.quizCats = [...W.quizCats, 'Mancave']; store.set('quiz-cats', W.quizCats); }
+  drawMq(); lobbySig = ''; drawLobby();
+  $('mq-q').focus();
+});
+
 $('cpu-add').onclick = () => {
   if (!MASTER || W.players.length >= MAX_PLAYERS) return;
   if (W.phase !== 'lobby' && W.phase !== 'podium') return;
@@ -1180,14 +1245,25 @@ function startPit() {
   const game = forced && GAMES[forced] ? forced : pool[Math.floor(Math.random() * pool.length)];
   W.pitUsed.push(game);
   W.pitsDone++;
+  const short = !!W.mgShort;
+  const seed = Math.floor(Math.random() * 1e9);
   W.pit = {
-    id: (Date.now() % 1e9) + W.pitsDone, n: W.pitsDone, of: pitLaps(W.laps).length, game, seed: Math.floor(Math.random() * 1e9),
-    stage: 'intro', stageT: 0, t: 0, dur: gameDuration(game), round: -1, roundT: 0, reveal: null, revealT: 0, pts: {}, live: [], results: null,
+    id: (Date.now() % 1e9) + W.pitsDone, n: W.pitsDone, of: pitLaps(W.laps).length, game, seed, short,
+    stage: 'intro', stageT: 0, t: 0, dur: gameDuration(game, short), rounds: gameRounds(game, short),
+    round: -1, roundT: 0, rt: 0, reveal: null, revealT: 0, pts: {}, live: [], results: null, tie: null, tieLive: null,
   };
+  quizSecret = [];
+  if (game === 'quiz') {
+    const qs = buildQuiz(seed, W.pit.rounds, W.quizCats, store.get('mancave-q', []));
+    quizSecret = qs.map(q => q.correct);
+    W.pit.qs = qs.map(({ q, cat, answers }) => ({ q, cat, answers }));
+  }
+  if (game === 'semaforo') W.pit.duel = duelStart(W.players.map(p => p.slot), seed, short);
   mgStates.clear();
   W.phase = 'pit';
   onPhaseChange(); pushStatus(true);
 }
+let quizSecret = [];               // (PC principale) risposte giuste del quiz, svelate manche per manche
 
 // tempo del pit stop visto da questo schermo (sugli schermi collegati stimo il tempo passato)
 function pitView() {
@@ -1205,8 +1281,9 @@ function pitInfo(slot) {
   const P = pitView();
   const me = P.results ? P.results.find(r => r.slot === slot) || null : null;
   return {
-    id: P.id, n: P.n, of: P.of, game: P.game, seed: P.seed, stage: P.stage, stageT: r2(P.stageT), t: r2(P.t), dur: P.dur,
-    round: P.round, roundT: r2(P.roundT), reveal: P.reveal, pts: P.pts[slot] || 0, me, places: P.results ? P.results.length : 0,
+    id: P.id, n: P.n, of: P.of, game: P.game, seed: P.seed, short: P.short, stage: P.stage, stageT: r2(P.stageT), t: r2(P.t), dur: P.dur,
+    rounds: P.rounds, round: P.round, roundT: r2(P.roundT), reveal: P.reveal, pts: P.pts[slot] || 0, me, places: P.results ? P.results.length : 0,
+    q: P.qs && P.round >= 0 ? P.qs[P.round] : null, duel: P.duel || null, tie: P.tie,
   };
 }
 
@@ -1215,12 +1292,13 @@ function pitLocalStep() {
   const P = W.pit;
   if (!P) return;
   const pv = pitView();
+  if (MASTER && P.game === 'quiz') pv.qc = quizSecret[P.round];
   for (const l of locals.values()) {
     if (l.slot < 0 || !isBot(l)) continue;
     let b = botMg.get(l.slot);
     if (!b || b.id !== P.id) { b = cpuMgNew(l.brain ? cpuLevel : 'normale', P.seed + l.slot * 7919); b.id = P.id; botMg.set(l.slot, b); }
-    if (P.stage !== 'play') continue;
-    l.mg = { ...cpuMgTick(b, P.game, DT, pv), id: P.id };
+    if (P.stage !== 'play' && P.stage !== 'tie') continue;
+    l.mg = { ...cpuMgTick(b, P.game, DT, pv, l.slot), id: P.id };
   }
   if (P.results && (P.stage === 'results' || P.stage === 'go')) {
     for (const r of P.results) {
@@ -1241,19 +1319,26 @@ function pitStep() {
   const g = GAMES[P.game];
   const st = (slot) => mgStates.get(slot) || {};
   if (P.stage === 'intro') {
-    if (P.stageT >= PIT_INTRO) { P.stage = 'play'; P.stageT = 0; P.t = 0; if (g.rounds) { P.round = 0; P.roundT = 0; } pushStatus(true); }
+    if (P.stageT >= PIT_INTRO) {
+      P.stage = 'play'; P.stageT = 0; P.t = 0;
+      if (g.rounds || g.duel) { P.round = 0; P.roundT = 0; P.rt = g.duel ? semRoundTime(P.seed, 0) : g.roundTime; }
+      if (g.duel && P.duel.over) endPlay();
+      pushStatus(true);
+    }
   } else if (P.stage === 'play') {
     P.t += DT;
-    if (g.rounds) {
+    if (g.rounds || g.duel) {
       if (P.reveal == null) {
         P.roundT += DT;
-        const all = W.players.length && W.players.every(p => { const a = st(p.slot).ans; return a && a[P.round] != null; });
-        if (P.roundT >= g.roundTime || (all && P.roundT > 1)) resolveRound();
+        const who = g.duel ? W.players.filter(p => duelPairOf(P.duel, p.slot)) : W.players;
+        const all = who.length && who.every(p => { const a = st(p.slot).ans; return a && a[P.round] != null; });
+        if (P.roundT >= P.rt || (all && P.roundT > (g.duel ? 0.3 : 1))) resolveRound();
       } else {
         P.revealT += DT;
         if (P.revealT >= g.revealTime) {
           P.reveal = null; P.round++; P.roundT = 0;
-          if (P.round >= g.rounds) { P.round = g.rounds - 1; endPlay(); }
+          P.rt = g.duel ? semRoundTime(P.seed, P.round) : g.roundTime;
+          if (g.duel ? P.duel.over : P.round >= P.rounds) { P.round--; endPlay(); }
           pushStatus(true);
         }
       }
@@ -1270,6 +1355,10 @@ function pitStep() {
       slot: p.slot, label: liveLabel(P.game, st(p.slot), P, p.slot), bar: liveBar(P.game, st(p.slot), P, p.slot, maxPts),
       out: !!st(p.slot).out, done: !!st(p.slot).done,
     }));
+  } else if (P.stage === 'tie') {
+    P.tieLive = {};
+    for (const slot of P.tie.slots) P.tieLive[slot] = st(slot).tie || 0;
+    if (P.stageT >= TIE_INTRO + TIE_TAP + 0.6) finishRanking(applyTie(P.preRank, P.tieLive, P.seed));
   } else if (P.stage === 'results') {
     if (P.stageT >= PIT_RESULTS) { P.stage = 'go'; P.stageT = 0; pushStatus(true); }
   } else if (P.stage === 'go') {
@@ -1283,30 +1372,47 @@ function resolveRound() {
   for (const p of W.players) {
     const a = (mgStates.get(p.slot) || {}).ans;
     const v = a ? Number(a[P.round]) : NaN;
-    if (Number.isInteger(v) && v >= 0 && v < (P.game === 'porta' ? 3 : 4)) picks[p.slot] = v;
+    if (P.game === 'semaforo') { if (Number.isFinite(v) && v >= 0) picks[p.slot] = Math.round(v); }
+    else if (Number.isInteger(v) && v >= 0 && v < (P.game === 'porta' ? 3 : 4)) picks[p.slot] = v;
   }
-  if (P.game === 'porta') {
+  if (P.game === 'semaforo') {
+    P.reveal = { res: duelRound(P.duel, picks) };
+  } else if (P.game === 'porta') {
     const cnt = [0, 0, 0];
     for (const v of Object.values(picks)) cnt[v]++;
     for (const [slot, v] of Object.entries(picks)) if (cnt[v] === 1) P.pts[slot] = (P.pts[slot] || 0) + 1;
     P.reveal = { picks, lone: cnt.map(c => c === 1) };
   } else {
-    const q = quizRound(P.seed, P.round);
+    const correct = quizSecret[P.round];
     for (const [slot, v] of Object.entries(picks)) {
       const at = Number(((mgStates.get(Number(slot)) || {}).at || {})[P.round]);
       const ms = Number.isFinite(at) ? at : g.roundTime * 1000;
-      if (v === q.correct) P.pts[slot] = (P.pts[slot] || 0) + 10 + Math.max(0, Math.round(5 * (1 - ms / (g.roundTime * 1000))));
+      if (v === correct) P.pts[slot] = (P.pts[slot] || 0) + 10 + Math.max(0, Math.round(5 * (1 - ms / (g.roundTime * 1000))));
       else P.pts[slot] = (P.pts[slot] || 0) - 5;
     }
-    P.reveal = { picks, correct: q.correct };
+    P.reveal = { picks, correct };
   }
   P.revealT = 0;
   pushStatus(true);
 }
 
+// fine del gioco: se qualcuno è a pari merito si fa lo spareggio a tap
 function endPlay() {
   const P = W.pit;
   const ranking = rankGame(P.game, W.players.map(p => ({ slot: p.slot, s: mgStates.get(p.slot) })), P);
+  const groups = tieGroups(ranking);
+  if (groups.length) {
+    P.preRank = ranking;
+    P.tie = { slots: groups.flat(), groups };
+    P.tieLive = {};
+    P.stage = 'tie'; P.stageT = 0;
+    pushStatus(true);
+    return;
+  }
+  finishRanking(ranking);
+}
+function finishRanking(ranking) {
+  const P = W.pit;
   P.results = ranking.map(r => ({ ...r, prize: prizeFor(r.place, ranking.length) }));
   P.stage = 'results'; P.stageT = 0;
   pushStatus(true);

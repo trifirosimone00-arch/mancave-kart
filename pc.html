@@ -43,6 +43,11 @@
         <div><span class="label">Questo schermo</span><div class="seg" id="layout"></div></div>
         <div><span class="label">Altri monitor</span><button class="btn ghost" id="open-screen" type="button">+ Apri altro monitor</button></div>
       </div>
+      <div class="settings mg-settings" id="mg-settings">
+        <div><span class="label">Minigiochi</span><div class="seg" id="mg-len"></div></div>
+        <div><span class="label">Quiz</span><div class="seg" id="quiz-cats"></div></div>
+        <div><span class="label">Domande Mancave</span><button class="btn ghost" id="mq-open" type="button">Modifica</button></div>
+      </div>
       <div class="actions">
         <div class="cpu-box" id="cpu-box">
           <button class="btn ghost" id="cpu-add" type="button">+ Aggiungi computer</button>
@@ -86,6 +91,21 @@
 </div>
 
 <div id="pit" class="pit hidden" aria-live="polite"></div>
+<div id="mq" class="overlay hidden">
+  <div class="panel mq-panel">
+    <div class="mq-head"><h2 class="display">Domande Mancave</h2><button class="btn ghost" id="mq-close" type="button">Chiudi</button></div>
+    <p class="hint">Escono nel Quiz quando la categoria Mancave è accesa. Restano salvate su questo PC.</p>
+    <form id="mq-form" class="mq-form" autocomplete="off">
+      <label class="mq-q"><span class="label">Domanda</span><input id="mq-q" maxlength="120" required placeholder="Es. Chi ha vinto l'ultimo torneo di FIFA?"></label>
+      <label><span class="label">Risposta giusta</span><input id="mq-a0" maxlength="40" required></label>
+      <label><span class="label">Sbagliata 1</span><input id="mq-a1" maxlength="40" required></label>
+      <label><span class="label">Sbagliata 2</span><input id="mq-a2" maxlength="40" required></label>
+      <label><span class="label">Sbagliata 3</span><input id="mq-a3" maxlength="40" required></label>
+      <button class="btn primary" type="submit">AGGIUNGI</button>
+    </form>
+    <div class="mq-list" id="mq-list"></div>
+  </div>
+</div>
 <div id="lost" class="overlay hidden"><div class="panel" style="text-align:center"><h2 class="display" style="color:#ffd400;margin:0 0 8px">Collegamento perso</h2><p class="hint">Mi ricollego alla stanza…</p></div></div>
 <div id="toast" class="toast hidden"></div>
 <script type="module" src="js/station.js"></script>

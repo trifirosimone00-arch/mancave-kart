@@ -1,7 +1,8 @@
 // Minigiochi sul telefono. I giochi a riflessi girano qui (niente ritardo di rete):
-// al PC arriva solo lo stato (punti, fatto, eliminato).
+// al PC arriva solo lo stato (punti, fatto, eliminato, risposte).
 import {
-  GAMES, BALLOON_TAPS, CAN_FULL, SEM_ROUNDS, semDelay, barRound, pmNumbers, chipPlan, quizRound,
+  GAMES, PIT_INTRO, TIE_INTRO, TIE_TAP, BALLOON_TAPS, CAN_FULL, SEM_READY, SEM_FOUL, semDelay, barRound, pmNumbers, chipPlan,
+  makeMaze, mazeWall, duelPairOf, DUEL_NAMES,
 } from './minigames.js';
 import { CARDS } from './cards.js';
 
@@ -13,6 +14,7 @@ const now = () => performance.now();
 export function createMgPhone({ root, send, vib }) {
   const $ = (sel) => root.querySelector(sel);
   let pit = null, pitAt = 0;         // ultimo stato del pit stop e quando è arrivato
+  let mySlot = -1, names = {};
   let g = null;                      // partita in corso { id, game, t0, s, ... }
   let lastSent = 0, sentSig = '';
   let offerSig = '', offerPick = [];
@@ -20,6 +22,7 @@ export function createMgPhone({ root, send, vib }) {
 
   const elapsed = () => (g ? (now() - g.t0) / 1000 : 0);
   const buzz = (p) => { try { vib(p); } catch (e) { /* niente */ } };
+  const nameOf = (slot) => names[slot] || 'Avversario';
 
   function report(force) {
     if (!g) return;
@@ -33,20 +36,24 @@ export function createMgPhone({ root, send, vib }) {
 
   // ---------------------------------------------------------------- avvio di un gioco
   function start(p) {
-    g = { id: p.id, game: p.game, seed: p.seed, dur: p.dur, t0: now() - (p.t || 0) * 1000, s: {}, ui: {} };
+    stopMic();
+    g = { id: p.id, game: p.game, seed: p.seed, dur: p.dur, short: !!p.short, t0: now() - (p.t || 0) * 1000, s: {} };
     const s = g.s;
-    if (g.game === 'barra') { s.score = 0; s.round = 0; g.roundAt = now() + 600; g.wait = 0; }
+    if (g.game === 'barra') { s.score = 0; s.round = 0; g.roundAt = now() + 600; }
     if (g.game === 'pallone') s.n = 0;
-    if (g.game === 'lattina') s.p = 0;
-    if (g.game === 'semaforo') { s.round = 0; s.total = 0; g.roundAt = now() + 800; g.state = 'wait'; }
+    if (g.game === 'lattina' || g.game === 'regata' || g.game === 'labirinto') s.p = 0;
     if (g.game === 'patatine') { s.score = 0; g.plan = chipPlan(g.seed, g.dur); g.taken = new Set(); }
     if (g.game === 'piumeno') { s.best = 0; s.cur = 0; g.nums = pmNumbers(g.seed); g.i = 0; }
-    if (g.game === 'porta' || g.game === 'quiz') { s.ans = {}; s.at = {}; }
+    if (g.game === 'porta' || g.game === 'quiz' || g.game === 'semaforo') { s.ans = {}; s.at = {}; }
+    if (g.game === 'labirinto') startMaze();
     build();
     report(true);
   }
+  // per lo spareggio serve un contenitore anche se non ho giocato
+  function ensureGame(p) { if (!g || g.id !== p.id) { g = { id: p.id, game: p.game, seed: p.seed, dur: p.dur, t0: now(), s: {} }; built = ''; } }
 
-  function over() { return !g || g.s.done || elapsed() >= g.dur && !GAMES[g.game].rounds; }
+  const timed = () => !GAMES[g.game].rounds && !GAMES[g.game].duel;
+  function over() { return !g || g.s.done || (timed() && elapsed() >= g.dur); }
 
   // ---------------------------------------------------------------- disegno
   function build() {
@@ -59,10 +66,16 @@ export function createMgPhone({ root, send, vib }) {
     } else if (k === 'pallone' || k === 'lattina') {
       body.innerHTML = `<div class="mg-split"><div class="${k === 'pallone' ? 'balloon' : 'can'}" id="mg-vis"><i></i></div><div class="mg-big" id="mg-score">0%</div></div>
         <button class="mg-btn" type="button" id="mg-act">${k === 'pallone' ? 'TOCCA!' : 'SCUOTI!'}<small>${k === 'lattina' ? 'o tocca a raffica' : 'più veloce che puoi'}</small></button>`;
+    } else if (k === 'regata') {
+      body.innerHTML = `<div class="mg-split"><div class="sink"><i class="boat" id="mg-vis">⛵</i><i class="flag">🏁</i></div><div class="mg-big" id="mg-score">0%</div><div class="mg-sub" id="mg-mic">Tocca il tasto per usare il microfono</div></div>
+        <button class="mg-btn" type="button" id="mg-act">SOFFIA!<small id="mg-act-sub">tocca per attivare il microfono</small></button>`;
+    } else if (k === 'labirinto') {
+      body.innerHTML = `<canvas class="maze" id="mg-maze"></canvas><div class="maze-side"><div class="mg-big" id="mg-score">0%</div><div class="mg-sub" id="mg-tilt">Inclina il telefono</div>
+        <button class="btn ghost" type="button" id="mg-sensor">Attiva sensore</button><button class="btn ghost" type="button" id="mg-flip">Inverti</button></div>`;
     } else if (k === 'semaforo') {
-      body.innerHTML = `<button class="sem" type="button" id="mg-act"><b id="mg-light">ASPETTA…</b><small id="mg-score"></small></button>`;
+      body.innerHTML = `<button class="sem" type="button" id="mg-act"><b id="mg-light">PRONTI…</b><small id="mg-score"></small></button>`;
     } else if (k === 'patatine') {
-      body.innerHTML = `<div class="chips" id="mg-chips">${Array.from({ length: 9 }, (_, i) => `<button type="button" data-c="${i}"></button>`).join('')}</div><div class="mg-big side" id="mg-score">0</div>`;
+      body.innerHTML = `<div class="chips" id="mg-chips">${Array.from({ length: 9 }, (_, i) => `<button type="button" data-c="${i}" aria-label="Casella ${i + 1}"></button>`).join('')}</div><div class="mg-big side" id="mg-score">0</div>`;
     } else if (k === 'piumeno') {
       body.innerHTML = `<div class="pm"><div class="pm-n" id="mg-num"></div><div class="mg-sub" id="mg-score"></div></div>
         <div class="pm-btns"><button class="mg-btn up" type="button" id="mg-up">PIÙ ALTO</button><button class="mg-btn down" type="button" id="mg-down">PIÙ BASSO</button></div>`;
@@ -74,21 +87,35 @@ export function createMgPhone({ root, send, vib }) {
     bind();
   }
 
+  function buildTie() {
+    built = 'tie' + g.id;
+    $('#mg-body').innerHTML = `<button class="mg-btn" type="button" id="mg-tie">SPAREGGIO<small id="mg-tie-sub">preparati…</small></button>`;
+    $('#mg-tie').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (!pit || pit.stage !== 'tie' || pitStageT() < TIE_INTRO || pitStageT() > TIE_INTRO + TIE_TAP) return;
+      g.s.tie = (g.s.tie || 0) + 1;
+      if (g.s.tie % 5 === 0) buzz(8);
+      report();
+    });
+  }
+
   function bind() {
     const k = g.game;
     const act = $('#mg-act');
     const tap = (el, fn) => el && el.addEventListener('pointerdown', (e) => { e.preventDefault(); fn(e); });
     if (k === 'barra') tap(act, barStop);
     if (k === 'pallone') tap(act, () => { if (over() || g.s.popT != null) return; g.s.n++; if (g.s.n % 5 === 0) buzz(8); if (g.s.n >= BALLOON_TAPS) { g.s.popT = Math.round(elapsed() * 1000); g.s.done = 1; buzz([80, 40, 200]); } report(); });
-    if (k === 'lattina') tap(act, () => addFoam(1.4));
+    if (k === 'lattina') tap(act, () => addFill(1.4));
+    if (k === 'regata') tap(act, () => { if (!g.mic && !g.micTried) startMic(); else addFill(0.9); });
     if (k === 'semaforo') tap(act, semTap);
     if (k === 'patatine') root.querySelectorAll('#mg-chips button').forEach(b => tap(b, () => chipTap(Number(b.dataset.c))));
     if (k === 'piumeno') { tap($('#mg-up'), () => pmGuess(true)); tap($('#mg-down'), () => pmGuess(false)); }
     if (k === 'porta') root.querySelectorAll('.pdoor').forEach(b => tap(b, () => answer(Number(b.dataset.d))));
     if (k === 'quiz') root.querySelectorAll('.pq-a button').forEach(b => tap(b, () => answer(Number(b.dataset.a))));
+    if (k === 'labirinto') bindMaze();
   }
 
-  // ---------------------------------------------------------------- giochi
+  // ---------------------------------------------------------------- Ferma la barra
   function barPos() {
     const { speed } = barRound(g.s.round);
     const p = Math.max(0, (now() - g.roundAt) / 1000) * speed;
@@ -113,32 +140,177 @@ export function createMgPhone({ root, send, vib }) {
     report(true);
   }
 
-  function addFoam(v) {
-    if (!g || g.game !== 'lattina' || over() || g.s.popT != null) return;
+  // ---------------------------------------------------------------- lattina e regata: riempi fino a 100
+  function addFill(v) {
+    if (!g || over() || g.s.popT != null) return;
     g.s.p = Math.min(CAN_FULL, g.s.p + v);
-    if (g.s.p >= CAN_FULL) { g.s.popT = Math.round(elapsed() * 1000); g.s.done = 1; buzz([80, 40, 200]); }
+    if (g.s.p >= CAN_FULL) { g.s.popT = Math.round(elapsed() * 1000); g.s.done = 1; buzz([80, 40, 200]); stopMic(); }
     report();
   }
 
-  function semTap() {
-    if (over()) return;
-    const t = now();
-    if (g.state === 'wait') {
-      if (t < g.roundAt) return;               // pausa tra una manche e l'altra
-      g.s.total += 1000; g.last = 'Troppo presto! +1s'; semNext();
-      buzz([200]);
-    } else if (g.state === 'go') {
-      const ms = Math.round(t - g.goAt);
-      g.s.total += ms; g.last = `${ms} ms`; semNext();
-      buzz(30);
+  // microfono (Regata): più forte soffi, più va veloce la barchetta
+  async function startMic() {
+    g.micTried = true;
+    const gg = g;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      if (g !== gg || over()) { stream.getTracks().forEach(t => t.stop()); return; }
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      await ctx.resume();
+      const an = ctx.createAnalyser();
+      an.fftSize = 1024;
+      ctx.createMediaStreamSource(stream).connect(an);
+      g.mic = { stream, ctx, an, buf: new Float32Array(an.fftSize), base: 1, t0: now() };
+      $('#mg-mic').textContent = 'Soffia forte nel microfono!';
+      $('#mg-act-sub').textContent = 'oppure tocca per remare';
+    } catch (e) {
+      $('#mg-mic').textContent = 'Microfono non disponibile: tocca il tasto per remare';
+      $('#mg-act-sub').textContent = 'tocca a raffica per remare';
     }
   }
-  function semNext() {
-    g.s.round++;
-    if (g.s.round >= SEM_ROUNDS) { g.s.done = 1; g.state = 'done'; } else { g.state = 'wait'; g.roundAt = now() + 1200; }
+  function micLevel() {
+    const m = g.mic;
+    m.an.getFloatTimeDomainData(m.buf);
+    let sum = 0;
+    for (let i = 0; i < m.buf.length; i++) sum += m.buf[i] * m.buf[i];
+    const rms = Math.sqrt(sum / m.buf.length);
+    if (now() - m.t0 < 600) m.base = Math.min(m.base, rms);    // rumore di fondo della stanza
+    return Math.max(0, rms - m.base - 0.03);
+  }
+  function stopMic() {
+    if (g && g.mic) {
+      try { g.mic.stream.getTracks().forEach(t => t.stop()); g.mic.ctx.close(); } catch (e) { /* niente */ }
+      g.mic = null;
+    }
+  }
+
+  // ---------------------------------------------------------------- Labirinto
+  let tilt = { x: 0, y: 0, base: null, seen: 0, flip: 1 };
+  function onOrient(e) {
+    if (e.beta == null) return;
+    const a = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+    let x, y;
+    if (a === 90) { x = e.beta; y = -e.gamma; }
+    else if (a === 270 || a === -90) { x = -e.beta; y = e.gamma; }
+    else if (a === 180) { x = -e.gamma; y = -e.beta; }
+    else { x = e.gamma; y = e.beta; }
+    if (!tilt.base) tilt.base = { x, y };
+    tilt.x = Math.max(-1, Math.min(1, (x - tilt.base.x) / 22)) * tilt.flip;
+    tilt.y = Math.max(-1, Math.min(1, (y - tilt.base.y) / 22)) * tilt.flip;
+    tilt.seen = now();
+  }
+  window.addEventListener('deviceorientation', onOrient);
+  async function askSensor() {
+    try {
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') await DeviceOrientationEvent.requestPermission();
+    } catch (e) { /* niente */ }
+    tilt.base = null;
+  }
+  function startMaze() {
+    g.M = makeMaze(g.seed, g.short);
+    g.ball = { x: 0.5, y: 0.5, vx: 0, vy: 0 };
+    g.s.falls = 0;
+    g.drag = null;
+    tilt.base = null;
+  }
+  function bindMaze() {
+    const cv = $('#mg-maze');
+    const pos = (e) => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / g.cs, y: (e.clientY - r.top) / g.cs }; };
+    cv.addEventListener('pointerdown', (e) => { e.preventDefault(); cv.setPointerCapture?.(e.pointerId); g.drag = pos(e); });
+    cv.addEventListener('pointermove', (e) => { if (g.drag) g.drag = pos(e); });
+    const up = () => { g.drag = null; };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    $('#mg-sensor').addEventListener('click', askSensor);
+    $('#mg-flip').addEventListener('click', () => { tilt.flip *= -1; });
+  }
+  function mazeStep(dt) {
+    const M = g.M, b = g.ball, R = 0.22;
+    let ax = tilt.x * 16, ay = tilt.y * 16;
+    if (g.drag) { const dx = g.drag.x - b.x, dy = g.drag.y - b.y, d = Math.hypot(dx, dy) || 1; ax = dx / d * 14 * Math.min(1, d); ay = dy / d * 14 * Math.min(1, d); }
+    const steps = 4, h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      b.vx = (b.vx + ax * h) * (1 - 1.6 * h); b.vy = (b.vy + ay * h) * (1 - 1.6 * h);
+      const sp = Math.hypot(b.vx, b.vy);
+      if (sp > 6) { b.vx *= 6 / sp; b.vy *= 6 / sp; }
+      // asse x
+      let cx = Math.floor(b.x), cy = Math.floor(b.y);
+      let nx = b.x + b.vx * h;
+      const wallX = (dir) => mazeWall(M, cx, cy, dir) || (b.y - R < cy && cy > 0 && mazeWall(M, cx, cy - 1, dir)) || (b.y + R > cy + 1 && cy < M.H - 1 && mazeWall(M, cx, cy + 1, dir));
+      if (nx + R > cx + 1 && wallX('r')) { nx = cx + 1 - R; b.vx *= -0.25; }
+      if (nx - R < cx && wallX('l')) { nx = cx + R; b.vx *= -0.25; }
+      b.x = Math.max(R, Math.min(M.W - R, nx));
+      // asse y
+      cx = Math.floor(b.x); cy = Math.floor(b.y);
+      let ny = b.y + b.vy * h;
+      const wallY = (dir) => mazeWall(M, cx, cy, dir) || (b.x - R < cx && cx > 0 && mazeWall(M, cx - 1, cy, dir)) || (b.x + R > cx + 1 && cx < M.W - 1 && mazeWall(M, cx + 1, cy, dir));
+      if (ny + R > cy + 1 && wallY('d')) { ny = cy + 1 - R; b.vy *= -0.25; }
+      if (ny - R < cy && wallY('u')) { ny = cy + R; b.vy *= -0.25; }
+      b.y = Math.max(R, Math.min(M.H - R, ny));
+    }
+    const cx = Math.floor(b.x), cy = Math.floor(b.y);
+    for (const ho of M.holes) {
+      if (Math.hypot(b.x - (ho.x + 0.5), b.y - (ho.y + 0.5)) < 0.3) {
+        g.s.falls++; Object.assign(b, { x: 0.5, y: 0.5, vx: 0, vy: 0 }); g.flash = 'Caduto!'; g.flashAt = now(); buzz([200]);
+        report(true);
+        return;
+      }
+    }
+    if (cx === M.exit.x && cy === M.exit.y) { g.s.popT = Math.round(elapsed() * 1000); g.s.done = 1; g.s.p = 100; buzz([80, 40, 200]); report(true); return; }
+    g.s.p = Math.max(0, Math.round(100 * (1 - M.dist[cy][cx] / M.total)));
+  }
+  function mazeDraw() {
+    const cv = $('#mg-maze');
+    if (!cv) return;
+    const M = g.M, b = g.ball;
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cs = Math.floor(Math.min(r.width / M.W, r.height / M.H));
+    g.cs = cs;
+    if (cv.width !== Math.round(r.width * dpr) || cv.height !== Math.round(r.height * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
+    const c = cv.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, r.width, r.height);
+    c.fillStyle = '#c8a46a'; c.fillRect(0, 0, M.W * cs, M.H * cs);
+    // uscita
+    c.fillStyle = '#2ec46b'; c.fillRect(M.exit.x * cs + 3, M.exit.y * cs + 3, cs - 6, cs - 6);
+    c.fillStyle = '#fff'; c.font = `900 ${Math.round(cs * 0.45)}px sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText('🏁', (M.exit.x + 0.5) * cs, (M.exit.y + 0.5) * cs);
+    // buchi
+    for (const h of M.holes) { c.fillStyle = '#1a1a1a'; c.beginPath(); c.arc((h.x + 0.5) * cs, (h.y + 0.5) * cs, cs * 0.3, 0, Math.PI * 2); c.fill(); }
+    // muri
+    c.strokeStyle = '#5a3a1a'; c.lineWidth = Math.max(3, cs * 0.09); c.lineCap = 'round';
+    c.beginPath();
+    for (let y = 0; y < M.H; y++) for (let x = 0; x < M.W; x++) {
+      if (mazeWall(M, x, y, 'r')) { c.moveTo((x + 1) * cs, y * cs); c.lineTo((x + 1) * cs, (y + 1) * cs); }
+      if (mazeWall(M, x, y, 'd')) { c.moveTo(x * cs, (y + 1) * cs); c.lineTo((x + 1) * cs, (y + 1) * cs); }
+      if (x === 0) { c.moveTo(0, y * cs); c.lineTo(0, (y + 1) * cs); }
+      if (y === 0) { c.moveTo(x * cs, 0); c.lineTo((x + 1) * cs, 0); }
+    }
+    c.stroke();
+    // pallina
+    const grad = c.createRadialGradient((b.x - 0.07) * cs, (b.y - 0.07) * cs, 2, b.x * cs, b.y * cs, cs * 0.22);
+    grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#9aa3b5');
+    c.fillStyle = grad; c.beginPath(); c.arc(b.x * cs, b.y * cs, cs * 0.22, 0, Math.PI * 2); c.fill();
+  }
+
+  // ---------------------------------------------------------------- Semaforo a duelli (le manche le decide il PC)
+  function semClock() {
+    // secondi dall'inizio della manche (stimati dall'ultimo stato)
+    return pit.roundT + (now() - pitAt) / 1000;
+  }
+  function semTap() {
+    if (!pit || pit.stage !== 'play' || pit.reveal || pit.round < 0) return;
+    const r = pit.round;
+    if (g.s.ans[r] != null || !duelPairOf(pit.duel, mySlot)) return;
+    const t = semClock() - SEM_READY;
+    if (t < 0) return;
+    const d = semDelay(g.seed, r);
+    if (t < d) { g.s.ans[r] = SEM_FOUL; g.last = 'Troppo presto!'; buzz([200]); }
+    else { g.s.ans[r] = Math.round((t - d) * 1000); g.last = `${g.s.ans[r]} ms`; buzz(30); }
     report(true);
   }
 
+  // ---------------------------------------------------------------- patatine, più o meno, porte e quiz
   function chipTap(cell) {
     if (over()) return;
     const t = elapsed();
@@ -151,7 +323,6 @@ export function createMgPhone({ root, send, vib }) {
     buzz(bad ? [120] : 15);
     report();
   }
-
   function pmGuess(up) {
     if (over() || now() < (g.pmWait || 0)) return;
     const cur = g.nums[g.i], next = g.nums[g.i + 1];
@@ -162,7 +333,6 @@ export function createMgPhone({ root, send, vib }) {
     g.flashAt = now();
     report(true);
   }
-
   function answer(i) {
     if (!pit || pit.stage !== 'play' || pit.reveal || pit.round < 0) return;
     const r = pit.round;
@@ -174,17 +344,32 @@ export function createMgPhone({ root, send, vib }) {
   }
 
   // ---------------------------------------------------------------- ogni fotogramma
+  const pitStageT = () => pit.stageT + (now() - pitAt) / 1000;
+  let lastFrame = now();
   function frame() {
     requestAnimationFrame(frame);
+    const tNow = now(), dt = Math.min(0.05, (tNow - lastFrame) / 1000);
+    lastFrame = tNow;
     if (!pit || root.classList.contains('hidden')) return;
     const P = pit;
     const lt = P.stage === 'play' && g ? elapsed() : 0;
-    // tempo in alto
+    const G = GAMES[P.game];
     let time = '';
-    if (P.stage === 'intro') time = `Si parte tra ${Math.max(1, Math.ceil(5 - P.stageT - (now() - pitAt) / 1000))}`;
-    else if (P.stage === 'play' && GAMES[P.game].rounds) time = `${P.game === 'quiz' ? 'Domanda' : 'Manche'} ${P.round + 1}/${GAMES[P.game].rounds}`;
+    if (P.stage === 'intro') time = `Si parte tra ${Math.max(1, Math.ceil(PIT_INTRO - pitStageT()))}`;
+    else if (P.stage === 'play' && G.duel) time = `Manche ${P.round + 1}`;
+    else if (P.stage === 'play' && G.rounds) time = `${P.game === 'quiz' ? 'Domanda' : 'Manche'} ${P.round + 1}/${P.rounds || G.rounds}`;
     else if (P.stage === 'play') time = `${Math.max(0, Math.ceil(P.dur - lt))}s`;
+    else if (P.stage === 'tie') time = pitStageT() < TIE_INTRO ? 'Spareggio!' : `${Math.max(0, Math.ceil(TIE_INTRO + TIE_TAP - pitStageT()))}s`;
     $('#mg-time').textContent = time;
+
+    if (P.stage === 'tie' && g && built === 'tie' + g.id) {
+      const st = pitStageT();
+      const sub = $('#mg-tie-sub'), btn = $('#mg-tie');
+      btn.classList.toggle('go', st >= TIE_INTRO && st <= TIE_INTRO + TIE_TAP);
+      sub.textContent = st < TIE_INTRO ? 'preparati…' : st <= TIE_INTRO + TIE_TAP ? `TOCCA A RAFFICA! ${g.s.tie || 0}` : `Fatto: ${g.s.tie || 0} tap`;
+      report();
+      return;
+    }
     if (P.stage !== 'play' || !g || g.id !== P.id) return;
     const s = g.s, k = g.game;
     const flash = g.flash && now() - g.flashAt < 800 ? g.flash : '';
@@ -203,22 +388,48 @@ export function createMgPhone({ root, send, vib }) {
       else vis.firstChild.style.height = `${Math.round(f * 100)}%`;
       vis.classList.toggle('pop', s.popT != null);
       $('#mg-score').textContent = s.popT != null ? (k === 'pallone' ? 'BOOM!' : 'SPLASH!') : `${Math.round(f * 100)}%`;
+    } else if (k === 'regata') {
+      if (g.mic && !over()) { const lv = micLevel(); if (lv > 0) addFill(Math.min(15, lv * 60) * dt); }
+      $('#mg-vis').style.left = `${Math.min(88, s.p * 0.88)}%`;
+      $('#mg-score').textContent = s.popT != null ? 'ARRIVATO!' : `${Math.round(s.p)}%`;
+      if (over()) stopMic();
+    } else if (k === 'labirinto') {
+      if (!over()) mazeStep(dt);
+      mazeDraw();
+      $('#mg-score').textContent = flash || (s.popT != null ? 'USCITO!' : `${s.p}%`);
+      $('#mg-tilt').textContent = now() - tilt.seen < 1500 ? 'Inclina il telefono' : 'Trascina il dito sul labirinto';
     } else if (k === 'semaforo') {
       const light = $('#mg-light'), btn = $('#mg-act');
-      if (g.state === 'wait' && now() >= g.roundAt) {
-        const goAt = g.roundAt + semDelay(g.seed, s.round) * 1000;
-        if (now() >= goAt) { g.state = 'go'; g.goAt = goAt; buzz(40); }
+      const pair = duelPairOf(P.duel, mySlot);
+      const r = P.round;
+      let cls = 'pause', txt = '', sub = '';
+      if (P.reveal) {
+        const res = (P.reveal.res || []).find(x => x.a === mySlot || x.b === mySlot);
+        if (res) { txt = res.w === mySlot ? 'MANCHE VINTA!' : res.w == null ? 'Pari' : 'Manche persa'; cls = res.w === mySlot ? 'go' : 'pause'; }
+        else txt = 'Guarda la TV';
+      } else if (!pair) {
+        const D = P.duel;
+        txt = D && D.place[mySlot] ? `${D.place[mySlot]}° posto` : D && D.bye === mySlot ? 'Sei già in finale' : 'Guarda la TV';
+        sub = 'Tocca agli altri';
+      } else {
+        const opp = pair.a === mySlot ? pair.b : pair.a;
+        const me = pair.a === mySlot ? pair.sa : pair.sb, him = pair.a === mySlot ? pair.sb : pair.sa;
+        sub = `${DUEL_NAMES[pair.kind]} contro ${nameOf(opp)} · ${me}-${him}`;
+        if (s.ans[r] != null) { txt = g.last || 'Fatto'; cls = s.ans[r] >= SEM_FOUL ? 'wait' : 'pause'; }
+        else {
+          const t = semClock() - SEM_READY, d = semDelay(g.seed, r);
+          if (t < 0) { txt = 'PRONTI…'; cls = 'pause'; }
+          else if (t < d) { txt = 'ASPETTA…'; cls = 'wait'; }
+          else { txt = 'ORA!'; cls = 'go'; if (!g.goBuzz || g.goBuzz !== r + 1) { g.goBuzz = r + 1; buzz(40); } }
+        }
       }
-      if (g.state === 'go' && now() - g.goAt > 1500) { g.s.total += 1000; g.last = 'Troppo lento! +1s'; semNext(); }
-      btn.className = 'sem ' + (g.state === 'go' ? 'go' : g.state === 'done' ? 'done' : now() < g.roundAt ? 'pause' : 'wait');
-      light.textContent = g.state === 'go' ? 'ORA!' : g.state === 'done' ? 'FATTO!' : now() < g.roundAt ? (g.last || 'Pronti…') : 'ASPETTA…';
-      $('#mg-score').textContent = `Manche ${Math.min(SEM_ROUNDS, s.round + (g.state === 'done' ? 0 : 1))}/${SEM_ROUNDS} · totale ${(s.total / 1000).toFixed(2)}s`;
+      btn.className = 'sem ' + cls;
+      light.textContent = txt;
+      $('#mg-score').textContent = sub;
     } else if (k === 'patatine') {
-      const t = lt;
-      const cells = root.querySelectorAll('#mg-chips button');
       const show = new Array(9).fill(null);
-      g.plan.forEach((c, i) => { if (t >= c.at && t < c.at + c.life && !g.taken.has(i)) show[c.cell] = c.bad ? 'bad' : 'good'; });
-      cells.forEach((b, i) => { b.className = show[i] || ''; });
+      g.plan.forEach((c, i) => { if (lt >= c.at && lt < c.at + c.life && !g.taken.has(i)) show[c.cell] = c.bad ? 'bad' : 'good'; });
+      root.querySelectorAll('#mg-chips button').forEach((b, i) => { b.className = show[i] || ''; });
       $('#mg-score').textContent = `${s.score}`;
     } else if (k === 'piumeno') {
       $('#mg-num').textContent = g.nums[g.i];
@@ -232,10 +443,9 @@ export function createMgPhone({ root, send, vib }) {
       });
       $('#mg-score').textContent = P.reveal ? (mine != null && P.reveal.lone[mine] ? 'Eri da solo: +1!' : mine == null ? 'Non hai scelto' : 'Non eri da solo') + ` · ${P.pts} pt`
         : mine != null ? `Hai scelto la porta ${mine + 1}` : `Scegli una porta · ${P.pts} pt`;
-    } else if (k === 'quiz') {
-      const q = quizRound(g.seed, Math.max(0, P.round));
+    } else if (k === 'quiz' && P.q) {
       const mine = s.ans[P.round];
-      if (g.qr !== P.round) { g.qr = P.round; $('#mg-q').textContent = q.q; root.querySelectorAll('.pq-a button').forEach((b, i) => { b.textContent = q.answers[i]; }); }
+      if (g.qr !== P.round) { g.qr = P.round; $('#mg-q').textContent = P.q.q; root.querySelectorAll('.pq-a button').forEach((b, i) => { b.textContent = P.q.answers[i]; }); }
       root.querySelectorAll('.pq-a button').forEach((b, i) => {
         b.classList.toggle('on', mine === i);
         b.classList.toggle('off', (mine != null && mine !== i) || (!!P.reveal && i !== P.reveal.correct));
@@ -243,7 +453,7 @@ export function createMgPhone({ root, send, vib }) {
       });
     }
     // fine tempo: blocco il gioco
-    if (!GAMES[k].rounds && lt >= g.dur && !s.done) { s.done = 1; report(true); }
+    if (timed() && lt >= g.dur && !s.done) { s.done = 1; stopMic(); report(true); }
     report();
   }
   requestAnimationFrame(frame);
@@ -252,32 +462,47 @@ export function createMgPhone({ root, send, vib }) {
   function update(status) {
     const P = status.pit;
     pit = P; pitAt = now();
-    if (!P) { g = null; return; }
+    mySlot = status.slot;
+    for (const o of status.others || []) names[o.slot] = o.name;
+    if (!P) { stopMic(); g = null; built = ''; drawOffer(null); return; }
     const G = GAMES[P.game];
     $('#mg-tag').textContent = `PIT STOP ${P.n}${P.of ? ' di ' + P.of : ''}`;
     $('#mg-title').textContent = G.title;
-    const stageEl = $('#mg-stage');
+    const stageEl = $('#mg-stage'), body = $('#mg-body'), done = $('#mg-done');
     if (P.stage === 'play' && (!g || g.id !== P.id)) start(P);
     if (P.stage === 'intro') {
       stageEl.className = 'mg-stage';
       stageEl.innerHTML = `<p class="mg-help">${esc(G.help)}</p><p class="mg-sub">Guarda anche la TV · si parte tra poco</p>`;
+      body.classList.add('hidden'); done.classList.add('hidden');
     } else if (P.stage === 'play') {
       stageEl.className = 'mg-stage hidden';
       if (g && built !== g.id + g.game) build();
-      const doneMsg = g && g.s.done && !G.rounds;
-      $('#mg-body').classList.toggle('hidden', !!doneMsg);
-      $('#mg-done').classList.toggle('hidden', !doneMsg);
-      if (doneMsg) $('#mg-done').innerHTML = `<b>Fatto!</b><span>Guarda la TV per la classifica</span>`;
+      const doneMsg = g && g.s.done && timed();
+      body.classList.toggle('hidden', !!doneMsg);
+      done.classList.toggle('hidden', !doneMsg);
+      if (doneMsg) done.innerHTML = `<b>Fatto!</b><span>Guarda la TV per la classifica</span>`;
+    } else if (P.stage === 'tie') {
+      ensureGame(P);
+      const inTie = P.tie && P.tie.slots.includes(mySlot);
+      done.classList.add('hidden');
+      if (inTie) {
+        stageEl.className = 'mg-stage hidden';
+        if (built !== 'tie' + g.id) buildTie();
+        body.classList.remove('hidden');
+      } else {
+        body.classList.add('hidden');
+        stageEl.className = 'mg-stage';
+        stageEl.innerHTML = `<p class="mg-help">Spareggio tra ${esc(P.tie.slots.map(nameOf).join(' e '))}</p><p class="mg-sub">Guarda la TV</p>`;
+      }
     } else {
-      $('#mg-body').classList.add('hidden');
-      $('#mg-done').classList.add('hidden');
+      stopMic();
+      body.classList.add('hidden'); done.classList.add('hidden');
       stageEl.className = 'mg-stage';
       const me = P.me;
       let html = me ? `<div class="mg-place">${me.place}°</div><p class="mg-help">${esc(me.prize.text)}</p>` : '<p class="mg-help">Classifica sulla TV</p>';
       if (P.stage === 'go' || P.stage === 'done') html += '<p class="mg-sub">Si riparte! Tieni pronto il volante</p>';
       stageEl.innerHTML = html;
     }
-    if (P.stage === 'intro') { $('#mg-body').classList.add('hidden'); $('#mg-done').classList.add('hidden'); }
     drawOffer(status.offer);
   }
 
@@ -307,7 +532,7 @@ export function createMgPhone({ root, send, vib }) {
   let lastShake = 0;
   function shake(mag) {
     const t = now();
-    if (mag > 12 && t - lastShake > 90) { lastShake = t; addFoam(Math.min(6, (mag - 10) * 0.6)); }
+    if (mag > 12 && t - lastShake > 90) { lastShake = t; addFill(Math.min(6, (mag - 10) * 0.6)); }
   }
 
   return { update, shake, active: () => !!(pit && g && g.game === 'lattina' && pit.stage === 'play') };

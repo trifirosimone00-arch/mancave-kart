@@ -18,6 +18,10 @@
 <!-- 1. entrata -->
 <section id="join" class="screen">
   <h1 class="logo small">MANCAVE<br>KART</h1>
+  <div class="quick hidden" id="quick">
+    <button class="btn primary big" type="button" id="quick-go">RIENTRA</button>
+    <button class="btn ghost" type="button" id="quick-change">Cambia stanza o nome</button>
+  </div>
   <form id="join-form" autocomplete="off">
     <label class="field" id="code-field"><span class="label">Nome stanza</span>
       <input id="code" maxlength="12" inputmode="text" autocapitalize="characters" placeholder="MANCAVE" required></label>
@@ -44,8 +48,18 @@
     <div class="seg" id="laps"></div>
     <button class="btn primary big" type="button" id="start">INIZIA LA GARA</button>
   </div>
-  <p class="muted small">Durante la gara tieni il telefono in orizzontale, come un volante.</p>
-  <button class="btn ghost" type="button" id="leave">Esci</button>
+  <div class="cal" id="cal">
+    <span class="label">Prova lo sterzo prima di partire</span>
+    <div class="cal-row">
+      <svg id="cal-wheel" viewBox="0 0 170 170" width="70" height="70" aria-hidden="true"><circle cx="85" cy="85" r="70" fill="none" stroke="#e8ecf5" stroke-width="16"/><circle cx="85" cy="85" r="18" fill="#e8322b" stroke="#e8ecf5" stroke-width="6"/><path d="M67 85 L18 85 M103 85 L152 85 M85 103 L85 152" stroke="#e8ecf5" stroke-width="12" stroke-linecap="round"/></svg>
+      <div class="cal-ctl">
+        <button class="btn ghost" type="button" id="cal-center">Centra il volante</button>
+        <label class="field"><span class="label">Sensibilità: <b id="cal-sens-v"></b></span><input type="range" id="cal-sens" min="15" max="50" step="1"></label>
+      </div>
+    </div>
+    <p class="muted small">Tieni il telefono in orizzontale come un volante e inclinalo: la ruota deve girare insieme a te.</p>
+  </div>
+  <button class="btn ghost" type="button" id="leave">Esci dalla stanza</button>
 </section>
 
 <!-- 3. volante -->
@@ -67,6 +81,8 @@
       <button class="pbtn arrow" type="button" id="b-right" aria-label="Destra"><svg viewBox="0 0 24 24" width="54" height="54" aria-hidden="true"><path d="m9 4 8 8-8 8" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>
     <div class="pad-center">
+      <button class="combo-btn hidden" type="button" id="combo">COMBO <span></span></button>
+      <div class="pick-inline hidden" id="pick-inline" aria-live="polite"></div>
       <div class="hand" id="hand" aria-label="Le tue carte"></div>
       <div class="hand-hint" id="hand-hint">Passa sotto gli archi gialli per pescare carte</div>
       <svg id="wheel" viewBox="0 0 170 170" width="84" height="84" role="img" aria-label="Volante">
@@ -86,7 +102,8 @@
 
 <!-- 3b. pit stop -->
 <section id="mg" class="hidden">
-  <div class="mg-top"><span class="mg-tag" id="mg-tag"></span><h2 class="display mg-title" id="mg-title"></h2><span class="mg-time" id="mg-time"></span></div>
+  <div class="mg-top"><span class="mg-tag" id="mg-tag"></span><h2 class="display mg-title" id="mg-title"></h2><span class="mg-time" id="mg-time"></span><button class="mg-skip hidden" type="button" id="mg-skip">SALTA ▸</button><button class="icon small-ic" type="button" id="mg-set" aria-label="Menu">☰</button></div>
+  <div class="mg-count hidden" id="mg-count"></div>
   <div class="mg-stage" id="mg-stage"></div>
   <div class="mg-body hidden" id="mg-body"></div>
   <div class="mg-done hidden" id="mg-done"></div>
@@ -107,11 +124,6 @@
 <!-- pannelli -->
 <div id="rotate" class="cover hidden"><div><svg viewBox="0 0 24 24" width="64" height="64" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 8a8 8 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><p class="display">Gira il telefono</p><p class="muted">Tienilo in orizzontale, come un volante</p><button class="btn ghost" type="button" id="rot-ok">Ho il blocco rotazione: continua</button></div></div>
 <div id="paused" class="cover hidden"><div><p class="display big-t">PAUSA</p><p class="muted" id="paused-msg"></p><button class="btn primary" type="button" id="unpause">RIPRENDI</button></div></div>
-<div id="pick" class="cover hidden"><div class="sheet">
-  <p class="display" id="pick-title">Contro chi?</p>
-  <div class="pick-list" id="pick-list"></div>
-  <button class="btn ghost" type="button" id="pick-cancel">Annulla</button>
-</div></div>
 <div id="conn" class="cover hidden"><div><p class="display">Riconnessione…</p><p class="muted" id="conn-msg">Controlla il Wi-Fi</p></div></div>
 <div id="settings" class="cover hidden"><div class="sheet">
   <p class="display">Impostazioni</p>
@@ -127,6 +139,7 @@
     <button class="btn ghost" type="button" id="calib">Centra il volante</button>
     <button class="btn primary" type="button" id="set-close">FATTO</button>
   </div>
+  <button class="btn ghost danger" type="button" id="set-leave">Esci dalla stanza</button>
 </div></div>
 
 <script type="module" src="js/phone.js"></script>

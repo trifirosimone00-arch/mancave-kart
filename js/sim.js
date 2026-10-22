@@ -24,7 +24,7 @@ export function createKart(track, slot, gridIndex, player) {
     prevDrift: false, events: [], bumpCD: 0, grass: false,
     // effetti delle carte (secondi rimasti)
     shieldT: 0, mirror: 0, ghostT: 0, invertT: 0, stopT: 0, miniT: 0, slowT: 0, fogT: 0, bombT: 0,
-    contacts: [],
+    contacts: [], shX: 0, shZ: 0, shoveCD: 0,
   });
   return k;
 }
@@ -156,6 +156,11 @@ function move(track, k, dt, fx, fz) {
     vx -= rx * k.driftDir * k.speed * 0.16;
     vz -= rz * k.driftDir * k.speed * 0.16;
   }
+  // spallata: spinta di lato che si esaurisce in fretta (la velocità in avanti non cambia)
+  vx += k.shX || 0; vz += k.shZ || 0;
+  const f = Math.exp(-7 * dt);
+  k.shX = (k.shX || 0) * f; k.shZ = (k.shZ || 0) * f;
+  if (k.shoveCD > 0) k.shoveCD -= dt;
   k.x += vx * dt; k.z += vz * dt;
 
   const loc = locate(track, k.x, k.z, k.idx);
@@ -216,6 +221,18 @@ export function resolveStartBoost(k) {
   k.startPress = -1;
 }
 
+// spallate: ci si sposta di lato, ma senza rallentare (gare tirate, curva su curva)
+const SHOVE = 4.2, SHOVE_MAX = 9;
+function shove(k, nx, nz, closing) {
+  if (k.shoveCD > 0) return;
+  const j = SHOVE + Math.min(6, Math.max(0, closing) * 0.35);
+  k.shX = (k.shX || 0) + nx * j; k.shZ = (k.shZ || 0) + nz * j;
+  const m = Math.hypot(k.shX, k.shZ);
+  if (m > SHOVE_MAX) { k.shX *= SHOVE_MAX / m; k.shZ *= SHOVE_MAX / m; }
+  k.shoveCD = 0.18;
+}
+const velOf = (k) => [Math.sin(k.yaw) * (k.speed || 0) + (k.shX || 0), Math.cos(k.yaw) * (k.speed || 0) + (k.shZ || 0)];
+
 export function collideKarts(karts) {
   for (let i = 0; i < karts.length; i++) {
     for (let j = i + 1; j < karts.length; j++) {
@@ -229,8 +246,9 @@ export function collideKarts(karts) {
         if (a.bumpCD <= 0) { a.events.push('hit'); a.bumpCD = 0.4; }
         if (b.bumpCD <= 0) { b.events.push('hit'); b.bumpCD = 0.4; }
         a.contacts.push(b.slot); b.contacts.push(a.slot);
-        const avg = (a.speed + b.speed) / 2;
-        a.speed = a.speed * 0.85 + avg * 0.15; b.speed = b.speed * 0.85 + avg * 0.15;
+        const [avx, avz] = velOf(a), [bvx, bvz] = velOf(b);
+        const closing = (avx - bvx) * nx + (avz - bvz) * nz;
+        shove(a, -nx, -nz, closing); shove(b, nx, nz, closing);
       }
     }
   }
@@ -249,10 +267,13 @@ export function collideWithRemote(local, remotes) {
       const dx = a.x - b.x, dz = a.z - b.z, d = Math.hypot(dx, dz);
       const min = KART_RADIUS * 2;
       if (d > 0.001 && d < min) {
-        const push = min - d;
-        a.x += (dx / d) * push; a.z += (dz / d) * push;
-        if (a.bumpCD <= 0) { a.events.push('hit'); a.bumpCD = 0.4; a.speed *= 0.9; }
+        const push = min - d, nx = dx / d, nz = dz / d;
+        a.x += nx * push; a.z += nz * push;
+        if (a.bumpCD <= 0) { a.events.push('hit'); a.bumpCD = 0.4; }
         a.contacts.push(b.slot);
+        const [avx, avz] = velOf(a), [bvx, bvz] = velOf(b);
+        const closing = (bvx - avx) * nx + (bvz - avz) * nz;
+        shove(a, nx, nz, closing);
       }
     }
   }

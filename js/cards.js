@@ -16,7 +16,7 @@ export const CARDS = {
   mini:       { name: 'Mini',               rar: 'media',   bad: true,  target: 'pick',  color: '#00897b', desc: 'Rimpicciolito e lento per 5 secondi' },
   ghost:      { name: 'Fantasma',           rar: 'rara',    bad: false, target: 'none',  color: '#b0bec5', desc: '8 secondi trasparente: niente ti colpisce' },
   swap:       { name: 'Scambio',            rar: 'rara',    bad: true,  target: 'ahead', color: '#fbc02d', desc: 'Ti scambi con chi è davanti' },
-  bomb:       { name: 'Bomba a tempo',      rar: 'rara',    bad: true,  target: 'none',  color: '#212121', desc: 'Passala toccando un kart: esplode dopo 10 secondi' },
+  bomb:       { name: 'Bomba a tempo',      rar: 'rara',    bad: true,  target: 'none',  color: '#212121', desc: 'Passala toccando un kart: a ogni passaggio riparte da 10 secondi' },
   thief:      { name: 'Ladro',              rar: 'rara',    bad: true,  target: 'pick',  color: '#5d4037', desc: 'Rubi una carta a caso' },
   // combo (si ottengono trascinando una carta sull'altra)
   superturbo: { name: 'Super Turbo',        rar: 'combo',   bad: false, target: 'none',  color: '#ff5a00', desc: 'Un turbo unico da 5 secondi' },
@@ -35,7 +35,7 @@ export function comboOf(a, b) { return COMBOS[[a, b].sort().join('+')] || null; 
 
 export const HAND_SIZE = 3;
 export const COOLDOWN = 5;          // secondi tra una carta e l'altra
-export const PORTAL_COOLDOWN = 5;   // il portale si spegne dopo che qualcuno pesca
+export const PORTAL_COOLDOWN = 3;   // il portale si spegne dopo che qualcuno pesca
 export const PORTAL_FRACTIONS = [0.18, 0.47, 0.76]; // 3 portali per giro
 
 // rarità: le rare escono davvero poco (1-2 a gara)

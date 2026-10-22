@@ -4,9 +4,13 @@
 // vanno a manche decise dal PC principale.
 
 export const PIT_FRACTION = 0.56;        // dove si trova il pit stop nel giro
-export const PIT_INTRO = 5;              // spiegazione del minigioco
-export const PIT_RESULTS = 9;            // classifica e scelta dei premi
-export const PIT_GO = 3;                 // "si riparte" 3-2-1
+export const PIT_INTRO = 10;             // spiegazione del minigioco (si salta col tasto SALTA)
+export const PIT_COUNT = 3;              // 3-2-1 prima di giocare
+export const PIT_RESULTS = 8;            // classifica e scelta dei premi (si salta)
+export const PIT_GO = 3;                 // "si riparte" 3-2-1 VIA!
+export const PIT_MIN_SKIP = 1.5;         // anche saltando, almeno questo tempo a schermo
+export const LAMPO_CHANCE = 0.34;        // probabilità che un pit stop sia un minigioco lampo
+export const LAMPO_MAX = 20;             // dopo questo tempo riparte anche chi non ha finito
 export const TIE_INTRO = 2;              // spareggio: "pronti"
 export const TIE_TAP = 5;                // spareggio: 5 secondi di tap
 
@@ -82,6 +86,36 @@ export function gameDuration(id, short) {
   if (g.duel) return 0;
   if (g.rounds) return gameRounds(id, short) * (g.roundTime + g.revealTime);
   return short ? g.short : g.dur;
+}
+
+// minigiochi lampo: missione veloce, chi la finisce riparte subito
+export const LAMPO = {
+  tap:   { title: 'Tocca 25 volte!', short: 'TOCCA 25 VOLTE', n: 25 },
+  barra: { title: 'Ferma la barra nel verde!', short: 'FERMA LA BARRA' },
+  num:   { title: 'Tocca i numeri da 1 a 6 in ordine!', short: 'NUMERI 1-6', n: 6 },
+  shake: { title: 'Scuoti il telefono (o tocca)!', short: 'SCUOTI!', n: 40 },
+};
+export const LAMPO_IDS = Object.keys(LAMPO);
+// tempo (secondi) che ci mette un computer
+export function cpuLampoTime(level, R) {
+  const [a, b] = level === 'facile' ? [6, 9] : level === 'difficile' ? [3, 4.5] : [4, 6.5];
+  return a + R() * (b - a);
+}
+// numeri della missione "num": posizioni mescolate su una griglia 3x2
+export function lampoNumbers(seed) { return shuffle([1, 2, 3, 4, 5, 6], rng(seed + 3)); }
+
+// stato ridotto per disegnare il gioco di ognuno sulla TV
+export function liveState(game, s) {
+  s = s || {};
+  switch (game) {
+    case 'barra': return { c: s.v ? s.v.c : 0, h: s.v ? s.v.h : 0.2, out: s.out ? 1 : 0 };
+    case 'labirinto': return { x: s.v ? s.v.x : 0.5, y: s.v ? s.v.y : 0.5 };
+    case 'pallone': return { n: s.n || 0 };
+    case 'lattina': case 'regata': return { p: s.p || 0 };
+    case 'piumeno': return { i: s.i || 0, cur: s.cur || 0 };
+    case 'patatine': return { score: s.score || 0 };
+  }
+  return {};
 }
 
 // ------------------------------------------------------------------ parametri condivisi dei singoli giochi
@@ -417,9 +451,25 @@ export function cpuMgTick(b, game, dt, pit, slot) {
       if (R() < dt * 0.04) { s.falls = (s.falls || 0) + 1; b.p = Math.max(0, b.p - 15); }
       if (b.p >= 100) { b.p = 100; s.popT = Math.round(b.t * 1000); s.done = 1; }
       s.p = Math.floor(b.p);
+      // pallina sulla strada giusta, per la TV
+      if (!b.path) {
+        const M = makeMaze(pit.seed, pit.short);
+        b.path = [[0, 0]];
+        let x = 0, y = 0;
+        while ((x !== M.exit.x || y !== M.exit.y) && b.path.length < 200) {
+          const d = M.dist[y][x];
+          for (const [dx, dy, dir] of [[1, 0, 'r'], [-1, 0, 'l'], [0, 1, 'd'], [0, -1, 'u']]) {
+            if (!mazeWall(M, x, y, dir) && M.dist[y + dy][x + dx] === d - 1) { x += dx; y += dy; break; }
+          }
+          b.path.push([x, y]);
+        }
+      }
+      const pc = b.path[Math.min(b.path.length - 1, Math.floor(b.p / 100 * (b.path.length - 1)))];
+      s.v = { x: pc[0] + 0.5, y: pc[1] + 0.5 };
       break;
     }
     case 'barra': {
+      s.v = { c: Math.round(Math.sin(b.t * 3.4) * 100) / 100, h: barRound(s.round || 0).half };
       if (s.out || b.t < b.next) break;
       const r = s.round || 0;
       const p = L.hit * Math.pow(0.88, r);

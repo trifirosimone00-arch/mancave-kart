@@ -21,6 +21,7 @@
   <span id="sb-slots"></span>
   <button class="btn ghost" id="sb-open" type="button">+ Altro monitor</button>
   <button class="btn ghost" id="sb-full" type="button">Schermo intero</button>
+  <label class="vol"><span aria-hidden="true">🔊</span><input type="range" id="sb-vol" min="0" max="100" aria-label="Volume"></label>
 </div>
 
 <div id="lobby" class="overlay">
@@ -47,6 +48,7 @@
         <div><span class="label">Minigiochi</span><div class="seg" id="mg-len"></div></div>
         <div><span class="label">Quiz</span><div class="seg" id="quiz-cats"></div></div>
         <div><span class="label">Domande Mancave</span><button class="btn ghost" id="mq-open" type="button">Modifica</button></div>
+        <div><span class="label">Volume</span><label class="vol"><span aria-hidden="true">🔊</span><input type="range" id="lobby-vol" min="0" max="100" aria-label="Volume"></label></div>
       </div>
       <div class="actions">
         <div class="cpu-box" id="cpu-box">

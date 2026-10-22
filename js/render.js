@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { groundHeight, RAMP_LENGTH } from './track.js';
 import { MT_BLUE, MT_ORANGE } from './sim.js';
 import { PORTAL_FRACTIONS } from './cards.js';
-import { PIT_FRACTION } from './minigames.js';
+import { PIT_FRACTION, LAMPO, LAMPO_MAX } from './minigames.js';
 
 const TAG_LAYER0 = 1; // layer delle etichette nome: 1 + slot
 
@@ -553,7 +553,12 @@ export function createRenderer(canvas, hudRoot, track) {
         <div class="v-mt"><i></i><i></i><i></i></div>
         <div class="v-label"></div>
         <div class="v-fog"></div>
-        <div class="v-fx"></div>`;
+        <div class="v-fx"></div>
+        <div class="v-rank"></div>
+        <div class="v-meters"><div class="vm-card"></div><div class="vm-pit"></div></div>
+        <div class="v-mirror"></div>
+        <div class="v-hit"></div>
+        <div class="v-lampo"><small>MINIGIOCO LAMPO</small><b></b><span>sul telefono · chi finisce riparte subito</span></div>`;
       hudRoot.appendChild(el);
       const cam = new THREE.PerspectiveCamera(72, 1, 0.3, 2500);
       cam.layers.enable(0);
@@ -566,6 +571,10 @@ export function createRenderer(canvas, hudRoot, track) {
         center: el.querySelector('.v-center'), msg: el.querySelector('.v-msg'), mt: el.querySelector('.v-mt'),
         label: el.querySelector('.v-label'), msgUntil: 0, lastLap: -1, lastPlace: 0,
         fog: el.querySelector('.v-fog'), fx: el.querySelector('.v-fx'),
+        rank: el.querySelector('.v-rank'), mCard: el.querySelector('.vm-card'), mPit: el.querySelector('.vm-pit'),
+        lampo: el.querySelector('.v-lampo'), lampoOn: false,
+        mirrorEl: el.querySelector('.v-mirror'), hit: el.querySelector('.v-hit'), hitUntil: 0, rankSig: '', prevPlaces: {}, arrows: {},
+        mcam: (() => { const c = new THREE.PerspectiveCamera(60, 3, 0.3, 2500); c.layers.enable(0); for (let s = 0; s < 8; s++) if (s !== v.slot) c.layers.enable(TAG_LAYER0 + s); return c; })(),
       };
     });
     hudRoot.dataset.n = String(n);
@@ -615,6 +624,65 @@ export function createRenderer(canvas, hudRoot, track) {
   function flash(v, text, ms, cls = '') {
     v.msg.textContent = text; v.msg.className = 'v-msg show ' + cls;
     v.msgUntil = performance.now() + ms;
+  }
+
+  // classifica dal vivo in alto a sinistra, con triangolo verde/rosso quando si sale o si scende
+  function drawRank(v, snap, now) {
+    const list = [...snap.karts].sort((a, b) => a.place - b.place);
+    for (const q of list) {
+      const prev = v.prevPlaces[q.slot];
+      if (prev && prev !== q.place) v.arrows[q.slot] = { up: q.place < prev, until: now + 2500 };
+      v.prevPlaces[q.slot] = q.place;
+    }
+    const sig = list.map(q => {
+      const a = v.arrows[q.slot] && v.arrows[q.slot].until > now ? (v.arrows[q.slot].up ? 'u' : 'd') : '';
+      return `${q.slot}:${q.place}:${a}:${q.name}:${q.color}`;
+    }).join('|');
+    if (sig === v.rankSig) return;
+    v.rankSig = sig;
+    v.rank.innerHTML = '';
+    for (const q of list) {
+      const a = v.arrows[q.slot] && v.arrows[q.slot].until > now ? (v.arrows[q.slot].up ? 'up' : 'down') : '';
+      const row = document.createElement('div');
+      row.className = 'vr' + (q.slot === v.slot ? ' me' : '');
+      row.innerHTML = '<b></b><i></i><span></span><em></em>';
+      row.querySelector('b').textContent = q.place;
+      row.querySelector('i').style.background = q.color;
+      row.querySelector('span').textContent = q.name;
+      const em = row.querySelector('em');
+      if (a) { em.className = a; em.textContent = a === 'up' ? '▲' : '▼'; }
+      v.rank.appendChild(row);
+    }
+  }
+  // metri al prossimo arco delle carte e al pit stop (in alto a destra)
+  function drawMeters(v, snap, k) {
+    const L = track.length;
+    let best = Infinity, lit = true;
+    PORTAL_FRACTIONS.forEach((f, i) => {
+      const d = (f * L - k.s + L) % L;
+      if (d < best) { best = d; lit = !snap.portals || snap.portals[i] !== false; }
+    });
+    const ct = `Carta ${Math.round(best)} m`;
+    if (v.mCard.textContent !== ct) v.mCard.textContent = ct;
+    v.mCard.classList.toggle('off', !lit);
+    let pt = '';
+    if (snap.pitAt != null && !k.finished) {
+      const d = snap.pitAt - ((k.lapCount - 1) * L + k.s);
+      if (d > 0) pt = `Pit stop ${Math.round(d)} m`;
+    }
+    if (v.mPit.textContent !== pt) v.mPit.textContent = pt;
+    v.mPit.style.display = pt ? '' : 'none';
+  }
+  // "COLPITO: nome" / "COLPITO DA nome"
+  function drawHits(v, snap, now) {
+    for (const n of snap.notes || []) {
+      if (n.slot !== v.slot || (v.seenNotes || (v.seenNotes = new Set())).has(n.id)) continue;
+      v.seenNotes.add(n.id);
+      v.hit.textContent = n.text;
+      v.hit.className = 'v-hit show ' + (n.cls || '');
+      v.hitUntil = now + 1800;
+    }
+    if (now > v.hitUntil && v.hit.classList.contains('show')) v.hit.className = 'v-hit';
   }
 
   // snap: stato di gioco; slots: array di slot (o -1) per riquadro
@@ -749,6 +817,23 @@ export function createRenderer(canvas, hudRoot, track) {
       renderer.setScissor(x, H - y - h, w, h);
       renderer.render(scene, v.cam);
 
+      // ---- specchietto retrovisore (in alto al centro)
+      const showMirror = k && (snap.phase === 'race' || snap.phase === 'finish') && !k.finished && (mirrorOn === 'force' || (mirrorOn && prStep < STEPS.length - 1));
+      v.mirrorEl.style.display = showMirror ? 'block' : 'none';
+      if (showMirror) {
+        const mw = Math.round(w * 0.26), mh = Math.round(h * 0.12), mx = Math.round(x + (w - mw) / 2), my = Math.round(y + h * 0.025);
+        v.mirrorEl.style.left = ((mx - x) / w * 100) + '%'; v.mirrorEl.style.top = ((my - y) / h * 100) + '%';
+        v.mirrorEl.style.width = (mw / w * 100) + '%'; v.mirrorEl.style.height = (mh / h * 100) + '%';
+        const fx2 = Math.sin(k.yaw), fz2 = Math.cos(k.yaw);
+        v.mcam.aspect = mw / mh;
+        v.mcam.position.set(k.x - fx2 * 1.5, k.y + 1.7, k.z - fz2 * 1.5);   // dietro al kart: il pilota non copre la vista
+        v.mcam.lookAt(k.x - fx2 * 30, k.y + 1.2, k.z - fz2 * 30);
+        v.mcam.updateProjectionMatrix();
+        renderer.setViewport(mx, H - my - mh, mw, mh);
+        renderer.setScissor(mx, H - my - mh, mw, mh);
+        renderer.render(scene, v.mcam);
+      }
+
       // ---- HUD
       const racing = k && (snap.phase === 'race' || snap.phase === 'countdown' || snap.phase === 'finish');
       v.el.classList.toggle('racing', !!racing);
@@ -762,7 +847,8 @@ export function createRenderer(canvas, hudRoot, track) {
         v.lap.innerHTML = `GIRO <b>${lap}</b>/${snap.laps}`;
         v.time.textContent = fmt(k.finished ? k.finishTime : snap.raceTime);
         if (k.lapCount !== v.lastLap) {
-          if (v.lastLap >= 1 && k.lapCount === snap.laps && !k.finished) flash(v, 'ULTIMO GIRO!', 1800, 'gold');
+          if (v.lastLap >= 1 && k.lapCount === snap.laps && !k.finished) { flash(v, 'ULTIMO GIRO!', 1800, 'gold'); onEvent('lastlap', v.slot); }
+          else if (v.lastLap >= 1 && k.lapCount > v.lastLap && k.lapCount < snap.laps) { flash(v, `GIRO ${k.lapCount}`, 1500, ''); onEvent('lap', v.slot); }
           v.lastLap = k.lapCount;
         }
         // indicatore mini-turbo
@@ -784,6 +870,17 @@ export function createRenderer(canvas, hudRoot, track) {
         const fxs = fx.join(' · ');
         if (v.fx.textContent !== fxs) v.fx.textContent = fxs;
         v.fx.classList.toggle('bomb', k.bombT > 0);
+        drawRank(v, snap, now);
+        drawMeters(v, snap, k);
+      }
+      drawHits(v, snap, now);
+      // minigioco lampo: kart fermo finché non finisci la missione
+      const lm = snap.lampo && k && snap.lampo.done[k.slot] == null && snap.lampo.t < LAMPO_MAX ? snap.lampo : null;
+      if (lm) { v.lampo.querySelector('b').textContent = LAMPO[lm.mission].short; }
+      if (!!lm !== v.lampoOn) {
+        v.lampo.classList.toggle('show', !!lm);
+        if (v.lampoOn && !lm) flash(v, 'VIA!', 1200, 'gold');
+        v.lampoOn = !!lm;
       }
       // centro: countdown e messaggi
       let center = '';
@@ -806,6 +903,21 @@ export function createRenderer(canvas, hudRoot, track) {
       const g = v.map.getContext('2d');
       g.clearRect(0, 0, ms, ms);
       if (v.mapBase) g.drawImage(v.mapBase, 0, 0);
+      PORTAL_FRACTIONS.forEach((f, i) => {
+        const p = track.pts[Math.floor((f * track.length) / track.ds) % track.count];
+        const [px, py] = mapXY(p.x, p.z, ms);
+        const on = !snap.portals || snap.portals[i] !== false;
+        g.beginPath(); g.arc(px, py, ms * 0.03, 0, 7);
+        g.fillStyle = on ? '#ffd400' : '#6b7080'; g.fill();
+        g.lineWidth = 2; g.strokeStyle = '#1a1a1a'; g.stroke();
+      });
+      {
+        const p = track.pts[Math.floor((PIT_FRACTION * track.length) / track.ds) % track.count];
+        const [px, py] = mapXY(p.x, p.z, ms);
+        const r = ms * 0.03;
+        g.fillStyle = '#fff'; g.fillRect(px - r, py - r, r * 2, r * 2);
+        g.fillStyle = '#1a1a1a'; g.fillRect(px - r, py - r, r, r); g.fillRect(px, py, r, r);
+      }
       const sorted = [...snap.karts].sort((a, b) => (a.slot === v.slot) - (b.slot === v.slot));
       for (const q of sorted) {
         const [mx, my] = mapXY(q.x, q.z, ms);
@@ -818,5 +930,10 @@ export function createRenderer(canvas, hudRoot, track) {
     renderer.setScissorTest(false);
   }
 
-  return { render, renderer, perf, quality: () => STEPS[prStep] };
+  let onEvent = () => {};
+  let mirrorOn = true;
+  return {
+    render, renderer, perf, quality: () => STEPS[prStep],
+    onEvent: (fn) => { onEvent = fn; }, setMirror: (on) => { mirrorOn = on; },
+  };
 }

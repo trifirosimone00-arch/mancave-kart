@@ -32,9 +32,16 @@ function show(id) {
   st.view = id;
   checkRotate();
 }
+// durante la gara il telefono resta "in orizzontale": se lo giri, lo schermo resta disegnato di traverso
 function checkRotate() {
   const portrait = window.innerHeight > window.innerWidth;
-  $('rotate').classList.toggle('hidden', !(st.view === 'pad' && portrait && !st.ignoreRotate));
+  const playing = st.view === 'pad' || st.view === 'mg';
+  document.documentElement.classList.toggle('rot', playing && portrait);
+  $('rotate').classList.add('hidden');
+  if (playing) lockLandscape();
+}
+function lockLandscape() {
+  try { screen.orientation?.lock?.('landscape').catch(() => {}); } catch (e) { /* niente */ }
 }
 window.addEventListener('resize', checkRotate);
 window.addEventListener('orientationchange', () => setTimeout(checkRotate, 200));
@@ -61,6 +68,7 @@ function drawMode() {
   $('left-touch').classList.toggle('hidden', st.mode !== 'touch');
   $('b-brake-r').classList.toggle('hidden', st.mode !== 'touch');
   $('steer-hint').textContent = st.mode === 'tilt' ? 'Inclina il telefono per sterzare' : 'Usa le frecce per sterzare';
+  if ($('cal')) $('cal').classList.toggle('hidden', st.mode !== 'tilt');
 }
 for (const seg of [$('mode'), $('mode2')]) for (const b of seg.children) b.onclick = () => { st.mode = b.dataset.m; store.set('mode', st.mode); drawMode(); if (st.mode === 'tilt') askMotion(); };
 drawMode();
@@ -120,7 +128,7 @@ function onMotion(e) {
 // ------------------------------------------------------------------ tasti
 let drift = false, brake = false, left = false, right = false, trickPending = false;
 function hold(el, on, off) {
-  const down = (e) => { e.preventDefault(); el.setPointerCapture?.(e.pointerId); el.classList.add('down'); on(); };
+  const down = (e) => { e.preventDefault(); try { el.setPointerCapture?.(e.pointerId); } catch (err) { /* niente */ } el.classList.add('down'); on(); };
   const up = (e) => { e.preventDefault(); el.classList.remove('down'); off(); };
   el.addEventListener('pointerdown', down);
   el.addEventListener('pointerup', up);
@@ -133,6 +141,12 @@ hold($('b-brake-l'), () => { brake = true; send(); }, () => { brake = false; sen
 hold($('b-brake-r'), () => { brake = true; send(); }, () => { brake = false; send(); });
 hold($('b-left'), () => { left = true; }, () => { left = false; });
 hold($('b-right'), () => { right = true; }, () => { right = false; });
+
+// sicurezza: se non c'è più nessun dito sullo schermo, nessun tasto resta premuto
+document.addEventListener('touchend', (e) => {
+  if (e.touches.length) return;
+  if (drift || brake || left || right) { drift = brake = left = right = false; document.querySelectorAll('.pbtn.down').forEach(b => b.classList.remove('down')); send(); }
+}, { passive: true });
 
 let steerTouch = 0;
 function currentSteer(dt) {
@@ -208,12 +222,15 @@ function onData(msg) {
   }
 }
 
+let lastStatusAt = 0;
 function onStatus(s) {
   st.status = s;
+  lastStatusAt = performance.now();
   const racing = ['intro', 'countdown', 'race', 'pit', 'finish'].includes(s.phase);
   if (s.phase === 'lobby' && st.view !== 'wait') show('wait');
-  if (racing && s.phase !== 'pit' && st.view !== 'pad') show('pad');
-  if (s.phase === 'pit' && st.view !== 'mg') show('mg');
+  const lampoOn = !!(s.lampo && !s.lampo.done && s.phase === 'race');
+  if (racing && s.phase !== 'pit' && !lampoOn && st.view !== 'pad') show('pad');
+  if ((s.phase === 'pit' || lampoOn) && st.view !== 'mg') { closePick(); show('mg'); }
   mg.update(s);
   if (s.phase === 'podium' && st.view !== 'end') show('end');
 
@@ -258,7 +275,32 @@ function onStatus(s) {
 $('start').onclick = () => conn && conn.send({ t: 'start' });
 $('again').onclick = () => conn && conn.send({ t: 'again' });
 $('tolobby').onclick = () => conn && conn.send({ t: 'lobby' });
-$('leave').onclick = () => { st.left = true; if (conn) { conn.send({ t: 'leave' }); setTimeout(() => conn.close(), 200); } show('join'); };
+function leaveRoom() {
+  st.left = true;
+  closePick();
+  if (conn) { try { conn.send({ t: 'leave' }); } catch (e) { /* niente */ } const c = conn; setTimeout(() => { try { c.close(); } catch (e) { /* niente */ } }, 200); }
+  connected = false;
+  $('settings').classList.add('hidden'); $('conn').classList.add('hidden'); $('paused').classList.add('hidden');
+  show('join'); drawQuick();
+  $('enter').disabled = false;
+}
+$('leave').onclick = leaveRoom;
+$('set-leave').onclick = leaveRoom;
+$('mg-set').onclick = () => { $('settings').classList.remove('hidden'); };
+// rientro veloce: stanza e nome ricordati
+function drawQuick() {
+  const ok = st.name && /^[A-Z0-9]{2,12}$/.test(st.code);
+  $('quick').classList.toggle('hidden', !ok);
+  $('join-form').classList.toggle('hidden', !!ok);
+  if (ok) $('quick-go').textContent = `RIENTRA IN ${st.code} come ${st.name}`;
+}
+$('quick-go').onclick = () => { $('quick').classList.add('hidden'); $('join-form').classList.remove('hidden'); $('join-form').requestSubmit(); };
+$('quick-change').onclick = () => { $('quick').classList.add('hidden'); $('join-form').classList.remove('hidden'); $('code-field').classList.remove('hidden'); };
+drawQuick();
+// prova dello sterzo nella sala d'attesa
+$('cal-sens').value = st.sens; $('cal-sens-v').textContent = st.sens + '°';
+$('cal-sens').oninput = () => { st.sens = Number($('cal-sens').value); store.set('sens', st.sens); $('cal-sens-v').textContent = st.sens + '°'; $('sens').value = st.sens; $('sens-v').textContent = st.sens + '°'; };
+$('cal-center').onclick = () => { st.offset = st.rawAngle || 0; if (navigator.vibrate) navigator.vibrate(30); };
 $('rot-ok').onclick = () => { st.ignoreRotate = true; checkRotate(); };
 $('b-pause').onclick = () => conn && conn.send({ t: 'pause' });
 $('unpause').onclick = () => conn && conn.send({ t: 'pause' });
@@ -278,9 +320,10 @@ function send() {
   const s = Math.round(currentSteer(0) * 100) / 100;
   const msg = { t: 'in', s, d: drift, b: brake, q: (st.seq = (st.seq || 0) + 1) };
   if (trickPending) { msg.k = 1; trickPending = false; }
-  const sig = `${s}|${drift}|${brake}|${msg.k || 0}`;
-  if (sig === lastSent && now - lastSentT < 250) return;
-  lastSent = sig; lastSentT = now;
+  // lo stato completo dei comandi parte sempre (30 volte al secondo): se un messaggio
+  // si perde per strada, quello dopo lo corregge e nessun tasto resta "incastrato"
+  if (now - lastSentT < 25 && !msg.k) return;
+  lastSentT = now;
   try { conn.send(msg); } catch (e) { /* niente */ }
 }
 function loop() {
@@ -290,10 +333,21 @@ function loop() {
   $('wheel').style.transform = `rotate(${steer * 90}deg)`;
   // il tasto DERAPA cambia colore come il mini-turbo (stima locale)
   if (st.view === 'pad') {
-    if (st.mode === 'tilt' && motionOK && now - motionSeen > 1500 && st.status && st.status.phase === 'race') {
-      $('steer-hint').textContent = 'Il sensore non risponde: passa ai Tasti dalle impostazioni';
+    if (st.mode === 'tilt' && motionOK && now - motionSeen > 1000) {
+      // il sensore a volte si addormenta: lo riaggancio
+      if (now - (st.reMotion || 0) > 1000) { st.reMotion = now; window.removeEventListener('devicemotion', onMotion); window.addEventListener('devicemotion', onMotion); }
+      if (now - motionSeen > 3000 && st.status && st.status.phase === 'race') $('steer-hint').textContent = 'Il sensore non risponde: passa ai Tasti dalle impostazioni';
     }
   }
+  // collegamento: se lo schermo non risponde da 3 secondi mi ricollego da solo
+  if (connected && st.view !== 'join' && lastStatusAt && now - lastStatusAt > 3000 && now - (st.reconnAt || 0) > 4000) {
+    st.reconnAt = now;
+    $('conn').classList.remove('hidden');
+    try { conn.close(); } catch (e) { /* niente */ }
+    connected = false;
+    openConn();
+  }
+  if (st.view === 'wait') $('cal-wheel').style.transform = `rotate(${steer * 90}deg)`;
   send();
 }
 setInterval(loop, 33);
@@ -319,85 +373,64 @@ const mg = createMgPhone({ root: $('mg'), send: (m) => send2(m), vib: (p) => nav
 
 
 // ------------------------------------------------------------------ carte
-// Scorri una carta verso l'alto per usarla; trascinala su un'altra per una combo.
-let handSig = '';
+// Un tocco = usi la carta. Il tasto COMBO compare quando due carte si possono unire.
+// Per le carte "contro chi?" la scelta compare al centro e intanto si continua a guidare.
+let handSig = '', picking = null, pickT = 0;
 function drawHand(s) {
-  const h = s.hand || { cards: [], cd: 0, pending: null };
+  const h = s.hand || { cards: [], cd: 0 };
   const el = $('hand');
-  const sig = JSON.stringify(h.cards) + '|' + (h.pending || '');
   el.classList.toggle('cool', h.cd > 0);
-  el.classList.toggle('pending', !!h.pending);
   const hint = $('hand-hint');
-  hint.classList.toggle('warn', !!h.pending || h.cd > 0);
-  if (h.pending) hint.textContent = `Hai pescato ${CARDS[h.pending].name}: tocca la carta da buttare`;
-  else if (h.cd > 0) hint.textContent = `Ricarica: ${Math.ceil(h.cd)} s`;
-  else if (h.cards.length) hint.textContent = 'Scorri in su per usarla · trascinala su un\'altra per una combo';
+  const full = h.cards.length >= HAND_SIZE;
+  hint.classList.toggle('warn', h.cd > 0 || full);
+  if (h.cd > 0) hint.textContent = `Ricarica: ${Math.ceil(h.cd)} s`;
+  else if (full) hint.textContent = 'Mano piena: usa una carta per pescarne altre';
+  else if (h.cards.length) hint.textContent = 'Tocca una carta per usarla';
   else hint.textContent = 'Passa sotto gli archi gialli per pescare carte';
+  // tasto COMBO
+  const combo = findCombo(h.cards);
+  const cb = $('combo');
+  cb.classList.toggle('hidden', !combo || !!picking);
+  if (combo) { cb.querySelector('span').textContent = CARDS[combo.id].name; cb.dataset.a = combo.a; cb.dataset.b = combo.b; }
+  if (picking && (cardId(picking.i) !== picking.id || s.phase !== 'race')) closePick();
+  else if (picking) drawPick();
+  const sig = JSON.stringify(h.cards);
   if (sig === handSig) return;
   handSig = sig;
   el.innerHTML = '';
   for (let i = 0; i < HAND_SIZE; i++) {
     const id = h.cards[i];
-    const c = document.createElement('div');
-    if (!id) { c.className = 'card empty'; el.appendChild(c); continue; }
+    const c = document.createElement('button');
+    c.type = 'button';
+    if (!id) { c.className = 'card empty'; c.disabled = true; el.appendChild(c); continue; }
     const def = CARDS[id];
     c.className = 'card ' + (def.rar === 'rara' ? 'rara' : def.rar === 'combo' ? 'combo' : '');
     c.style.background = def.color;
-    c.dataset.i = String(i);
     c.innerHTML = '<span class="rar"></span><span class="nm"></span>';
     c.querySelector('.rar').textContent = def.rar;
     c.querySelector('.nm').textContent = def.name;
     c.setAttribute('aria-label', `${def.name}: ${def.desc}`);
-    bindCard(c, i);
+    // un tocco solo, appena il dito tocca la carta
+    c.addEventListener('pointerdown', (e) => { e.preventDefault(); c.classList.add('press'); setTimeout(() => c.classList.remove('press'), 150); play(i); });
     el.appendChild(c);
   }
 }
-
-function bindCard(c, i) {
-  let sx = 0, sy = 0, dragging = false;
-  c.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    c.setPointerCapture?.(e.pointerId);
-    sx = e.clientX; sy = e.clientY; dragging = true;
-    c.classList.add('drag');
-  });
-  c.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    const dx = e.clientX - sx, dy = e.clientY - sy;
-    c.style.transform = `translate(${dx}px, ${dy}px)`;
-    document.querySelectorAll('.card.target').forEach(t => t.classList.remove('target'));
-    const over = cardAt(e.clientX, e.clientY, c);
-    if (over && comboOf(cardId(i), cardId(Number(over.dataset.i)))) over.classList.add('target');
-  });
-  const end = (e) => {
-    if (!dragging) return;
-    dragging = false;
-    c.classList.remove('drag');
-    c.style.transform = '';
-    document.querySelectorAll('.card.target').forEach(t => t.classList.remove('target'));
-    const dx = e.clientX - sx, dy = e.clientY - sy;
-    const h = (st.status && st.status.hand) || {};
-    if (h.pending) { if (Math.hypot(dx, dy) < 20) send2({ t: 'discard', i }); return; }
-    const over = cardAt(e.clientX, e.clientY, c);
-    if (over && Math.hypot(dx, dy) > 30) {
-      const j = Number(over.dataset.i);
-      if (comboOf(cardId(i), cardId(j))) send2({ t: 'combo', a: i, b: j });
-      return;
-    }
-    if (dy < -40 && Math.abs(dy) > Math.abs(dx)) play(i);
-  };
-  c.addEventListener('pointerup', end);
-  c.addEventListener('pointercancel', end);
+function findCombo(cards) {
+  for (let a = 0; a < cards.length; a++) for (let b = a + 1; b < cards.length; b++) {
+    const id = comboOf(cards[a], cards[b]);
+    if (id) return { a, b, id };
+  }
+  return null;
 }
+$('combo').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const b = $('combo');
+  send2({ t: 'combo', a: Number(b.dataset.a), b: Number(b.dataset.b) });
+  if (navigator.vibrate) navigator.vibrate([20, 30, 40]);
+  b.classList.add('hidden');
+});
 
 function cardId(i) { const h = (st.status && st.status.hand) || { cards: [] }; return h.cards[i]; }
-function cardAt(x, y, self) {
-  self.style.pointerEvents = 'none';
-  const el = document.elementFromPoint(x, y);
-  self.style.pointerEvents = '';
-  const c = el && el.closest ? el.closest('.card') : null;
-  return c && c !== self && !c.classList.contains('empty') ? c : null;
-}
 function send2(msg) { if (conn && conn.open) { try { conn.send(msg); } catch (e) { /* niente */ } } }
 
 function play(i) {
@@ -406,21 +439,48 @@ function play(i) {
   const h = st.status.hand;
   if (h.cd > 0) { if (navigator.vibrate) navigator.vibrate([10, 40, 10]); return; }
   if (CARDS[id].target !== 'pick') { send2({ t: 'use', i }); return; }
-  // scegli l'avversario
-  const others = st.status.others || [];
-  if (!others.length) return;
-  $('pick-title').textContent = `${CARDS[id].name}: contro chi?`;
-  const list = $('pick-list');
-  list.innerHTML = '';
+  if (!(st.status.others || []).length) return;
+  picking = { i, id };
+  pickT = performance.now();
+  $('combo').classList.add('hidden');
+  drawPick();
+}
+// scelta del bersaglio: nomi grandi con la posizione, al centro; volante, derapata e freno restano attivi
+function drawPick() {
+  const box = $('pick-inline');
+  const others = [...(st.status.others || [])].sort((a, b) => (a.place || 9) - (b.place || 9));
+  const sig = JSON.stringify([picking.id, others]);
+  box.classList.remove('hidden');
+  $('pad').classList.add('picking');
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  box.innerHTML = `<div class="pk-t">${CARDS[picking.id].name}: contro chi?</div>`;
   for (const o of others) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.innerHTML = '<i></i><span></span>';
-    b.querySelector('i').style.background = o.color;
+    b.className = 'pk';
+    b.style.setProperty('--c', o.color);
+    b.innerHTML = '<b></b><span></span>';
+    b.querySelector('b').textContent = o.place ? o.place + '°' : '';
     b.querySelector('span').textContent = o.name;
-    b.onclick = () => { send2({ t: 'use', i, to: o.slot }); $('pick').classList.add('hidden'); };
-    list.appendChild(b);
+    b.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      send2({ t: 'use', i: picking.i, to: o.slot });
+      if (navigator.vibrate) navigator.vibrate(25);
+      closePick();
+    });
+    box.appendChild(b);
   }
-  $('pick').classList.remove('hidden');
+  const x = document.createElement('button');
+  x.type = 'button'; x.className = 'pk-x'; x.textContent = 'Annulla';
+  x.addEventListener('pointerdown', (e) => { e.preventDefault(); closePick(); });
+  box.appendChild(x);
 }
-$('pick-cancel').onclick = () => $('pick').classList.add('hidden');
+function closePick() {
+  picking = null;
+  const box = $('pick-inline');
+  box.classList.add('hidden'); box.dataset.sig = '';
+  $('pad').classList.remove('picking');
+}
+// la scelta si chiude da sola se non scegli
+setInterval(() => { if (picking && performance.now() - pickT > 7000) closePick(); }, 500);

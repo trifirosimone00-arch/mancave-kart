@@ -1,5 +1,8 @@
 // Pit stop sulla TV: spiegazione, gioco in corso, classifica e premi.
-import { GAMES, PIT_INTRO, PIT_GO, TIE_INTRO, TIE_TAP, SEM_READY, SEM_FOUL, semDelay, DUEL_NAMES } from './minigames.js';
+import {
+  GAMES, PIT_INTRO, PIT_COUNT, PIT_GO, TIE_INTRO, TIE_TAP, SEM_READY, SEM_FOUL, semDelay, DUEL_NAMES,
+  BALLOON_TAPS, makeMaze, mazeWall, chipPlan, pmNumbers,
+} from './minigames.js';
 
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const DOOR_COLORS = ['#e8322b', '#2f7bff', '#2ec46b'];
@@ -11,17 +14,75 @@ function clock(sec) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
+// labirinto in SVG (lo preparo una volta per partita)
+const mazeCache = new Map();
+function mazeSvg(seed, short) {
+  const key = seed + ':' + short;
+  if (mazeCache.has(key)) return mazeCache.get(key);
+  const M = makeMaze(seed, short);
+  let d = '';
+  for (let y = 0; y < M.H; y++) for (let x = 0; x < M.W; x++) {
+    if (mazeWall(M, x, y, 'r')) d += `M${x + 1} ${y}V${y + 1}`;
+    if (mazeWall(M, x, y, 'd')) d += `M${x} ${y + 1}H${x + 1}`;
+  }
+  d += `M0 0H${M.W}M0 0V${M.H}`;
+  const holes = M.holes.map(h => `<circle cx="${h.x + 0.5}" cy="${h.y + 0.5}" r="0.3" fill="#1a1a1a"/>`).join('');
+  const r = { M, base: `<rect width="${M.W}" height="${M.H}" fill="#c8a46a"/><rect x="${M.exit.x + 0.08}" y="${M.exit.y + 0.08}" width="0.84" height="0.84" fill="#2ec46b"/>${holes}<path d="${d}" stroke="#5a3a1a" stroke-width="0.1" stroke-linecap="round" fill="none"/>` };
+  mazeCache.set(key, r);
+  if (mazeCache.size > 6) mazeCache.delete(mazeCache.keys().next().value);
+  return r;
+}
+const chipCache = new Map();
+
+// il gioco di ognuno, dal vivo
+function miniView(P, r) {
+  const v = r.v || {};
+  switch (P.game) {
+    case 'barra': return `<div class="mv-bar"><i class="g" style="left:${50 - v.h * 50}%;width:${v.h * 100}%"></i><i class="c" style="left:${50 + (v.c || 0) * 50}%;opacity:${v.out ? 0.3 : 1}"></i></div>`;
+    case 'pallone': { const f = Math.min(1, (v.n || 0) / BALLOON_TAPS); return `<div class="mv-box"><div class="mv-ball ${r.done ? 'pop' : ''}" style="transform:scale(${0.3 + f * 0.8})"></div></div>`; }
+    case 'lattina': return `<div class="mv-box"><div class="mv-can"><i style="height:${Math.round(v.p || 0)}%"></i></div></div>`;
+    case 'regata': return `<div class="mv-sink"><i style="left:${Math.min(86, (v.p || 0) * 0.86)}%">⛵</i><em>🏁</em></div>`;
+    case 'labirinto': {
+      const m = mazeSvg(P.seed, P.short);
+      return `<svg class="mv-maze" viewBox="-0.1 -0.1 ${m.M.W + 0.2} ${m.M.H + 0.2}">${m.base}<circle cx="${v.x || 0.5}" cy="${v.y || 0.5}" r="0.22" fill="#fff" stroke="#555" stroke-width="0.04"/></svg>`;
+    }
+    case 'patatine': {
+      const key = P.seed + ':' + P.dur;
+      if (!chipCache.has(key)) { chipCache.clear(); chipCache.set(key, chipPlan(P.seed, P.dur)); }
+      const show = new Array(9).fill('');
+      for (const c of chipCache.get(key)) if (P.t >= c.at && P.t < c.at + c.life) show[c.cell] = c.bad ? 'bad' : 'good';
+      return `<div class="mv-chips">${show.map(c => `<i class="${c}"></i>`).join('')}</div>`;
+    }
+    case 'piumeno': return `<div class="mv-num">${pmNumbers(P.seed)[v.i || 0]}</div>`;
+  }
+  return '';
+}
+
 export function drawPit(el, P, players) {
-  if (!P) { el.innerHTML = ''; return; }
+  const put = (html) => { if (el._html !== html) { el._html = html; el.innerHTML = html; } };
+  if (!P) { put(''); return; }
+  el.classList.toggle('pit-clear', P.stage === 'go' || P.stage === 'done');
+  // 3-2-1 grande al centro
+  if (P.stage === 'count' || P.stage === 'go' || P.stage === 'done') {
+    const left = (P.stage === 'count' ? PIT_COUNT : PIT_GO) - P.stageT;
+    const txt = left > 0.05 ? String(Math.max(1, Math.ceil(left))) : 'VIA!';
+    put(`<div class="pit-big ${P.stage === 'count' ? '' : 'go'}"><b>${txt}</b><span>${P.stage === 'count' ? esc(GAMES[P.game].title) : 'Si riparte!'}</span></div>`);
+    return;
+  }
   const g = GAMES[P.game];
   const who = (slot) => players.find(p => p.slot === slot) || { name: '?', color: '#888' };
   const dot = (slot) => `<i class="pdot" style="background:${esc(who(slot).color)}"></i>`;
   let body = '';
   let timer = '';
 
+  const skipLine = () => {
+    const humans = players.filter(p => !p.cpu && !p.kbd);
+    if (!humans.length) return '';
+    return `<div class="pit-skip">${humans.map(p => `<span class="${P.skips && P.skips[p.slot] === P.stage ? 'ok' : ''}" style="--c:${esc(p.color)}">${esc(p.name)}</span>`).join('')}<em>premete SALTA sul telefono</em></div>`;
+  };
   if (P.stage === 'intro') {
     timer = `<div class="pit-timer"><b>${Math.max(1, Math.ceil(PIT_INTRO - P.stageT))}</b><span>si comincia</span></div>`;
-    body = `<p class="pit-help">${esc(g.help)}</p><p class="pit-sub">Si gioca col telefono</p>`;
+    body = `<p class="pit-help">${esc(g.help)}</p>${skipLine()}`;
   } else if (P.stage === 'play') {
     if (g.duel) {
       timer = `<div class="pit-timer"><b>${P.round + 1}</b><span>manche</span></div>`;
@@ -71,7 +132,16 @@ export function drawPit(el, P, players) {
       body += '</div>';
       if (!P.reveal) body += '<p class="pit-sub">Scegliete una porta sul telefono…</p>';
     }
-    body += '<div class="pit-live">';
+    const minis = ['barra', 'pallone', 'lattina', 'regata', 'labirinto', 'patatine', 'piumeno'].includes(P.game);
+    if (minis) {
+      body += `<div class="pit-minis n${(P.live || []).length}">`;
+      for (const r of P.live || []) {
+        const p = who(r.slot);
+        body += `<div class="mv ${r.out ? 'out' : ''} ${r.done ? 'done' : ''}" style="--c:${esc(p.color)}"><div class="mv-n">${esc(p.name)}</div>${miniView(P, r)}<div class="mv-l">${esc(r.label)}</div></div>`;
+      }
+      body += '</div>';
+    }
+    body += minis ? '<div class="pit-live hidden">' : '<div class="pit-live">';
     for (const r of P.live || []) {
       const p = who(r.slot);
       body += `<div class="pl ${r.out ? 'out' : ''} ${r.done ? 'done' : ''}" style="--c:${esc(p.color)}"><div class="pl-n">${esc(p.name)}</div>`
@@ -95,12 +165,12 @@ export function drawPit(el, P, players) {
       const p = who(r.slot);
       body += `<div class="pr p${r.place}" style="--c:${esc(p.color)}"><div class="pr-pl">${r.place}°</div><div class="pr-n">${esc(p.name)}<small>${esc(r.label)}${r.tie != null ? ` · spareggio ${r.tie} tap` : ''}</small></div><div class="pr-prize">${esc(r.prize.text)}</div></div>`;
     }
-    body += '</div><p class="pit-sub">Chi ha vinto sceglie le carte sul telefono</p>';
+    body += `</div>${skipLine()}`;
   }
 
-  el.innerHTML = `<div class="pit-box">
+  put(`<div class="pit-box">
     <div class="pit-head"><div><div class="pit-tag">PIT STOP ${P.n}${P.of ? ' di ' + P.of : ''} · ${esc(g.kind)}</div><h2 class="pit-title">${esc(g.title)}</h2></div>${timer}</div>
     ${body}
     <div class="pit-foot">La gara è in pausa · si riparte dalle posizioni di adesso</div>
-  </div>`;
+  </div>`);
 }

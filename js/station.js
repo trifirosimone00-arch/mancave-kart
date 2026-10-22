@@ -11,10 +11,12 @@ import { createScreenConfig, bindLayoutButtons, bindScreenBar } from './screen-u
 import { iceServers, PEER_PREFIX, hasTurn } from './net.js';
 import { CPU_LEVELS, CPU_NAMES, newBrain, cpuInput } from './ai.js';
 import {
-  PIT_FRACTION, PIT_INTRO, PIT_RESULTS, PIT_GO, TIE_INTRO, TIE_TAP, pitLaps, GAMES, GAME_IDS, gameDuration, gameRounds, rankGame, tieGroups, applyTie,
+  PIT_FRACTION, PIT_INTRO, PIT_COUNT, PIT_RESULTS, PIT_GO, PIT_MIN_SKIP, LAMPO_CHANCE, LAMPO_MAX, LAMPO, LAMPO_IDS, cpuLampoTime, liveState, rng,
+  TIE_INTRO, TIE_TAP, pitLaps, GAMES, GAME_IDS, gameDuration, gameRounds, rankGame, tieGroups, applyTie,
   liveLabel, liveBar, prizeFor, cpuMgNew, cpuMgTick, buildQuiz, duelStart, duelRound, duelPairOf, semRoundTime, QUIZ_CATS,
 } from './minigames.js';
 import { drawPit } from './mg-tv.js';
+import { createAudio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -26,6 +28,8 @@ const INTRO_TIME = 5;
 const COUNTDOWN = 3.2;
 const AFTER_FIRST = 30;
 const DT = 1 / 60;
+const BOMB_TIME = 10;        // a ogni passaggio la bomba riparte da qui
+const BOMB_HOLD = 2;         // secondi prima di poterla ripassare
 const NET_MS = 33;           // ~30 aggiornamenti di rete al secondo
 const INTERP_MS = 90;        // ritardo di interpolazione per i kart degli altri schermi
 
@@ -36,6 +40,14 @@ const store = {
 
 const track = buildTrack();
 const view = createRenderer($('game'), $('hud'), track);
+const audio = createAudio();
+view.onEvent((e) => audio.play(e));
+for (const id of ['sb-vol', 'lobby-vol']) {
+  const el = document.getElementById(id);
+  if (!el) continue;
+  el.value = Math.round(audio.volume() * 100);
+  el.addEventListener('input', () => { audio.setVolume(el.value / 100); for (const o of ['sb-vol', 'lobby-vol']) { const x = document.getElementById(o); if (x && x !== el) x.value = el.value; } });
+}
 const screen = createScreenConfig(MASTER ? 'mck-screen-main' : 'mck-screen-join');
 
 // ------------------------------------------------------------------ stato
@@ -51,7 +63,7 @@ const W = {                       // stato della stanza (sul PC principale è la
   q: 0, raceId: 0, phase: 'lobby', laps: 3, raceTime: 0, countdown: 0, introT: 0,
   paused: false, pauseMsg: '', players: [], grid: [], karts: [], results: [], captain: -1,
   portals: PORTAL_FRACTIONS.map(() => 0), hazards: [], missiles: [], feed: [],
-  pit: null, pitsDone: 0, pitUsed: [],
+  pit: null, pitsDone: 0, pitUsed: [], lampo: null,
 };
 W.mgShort = !!store.get('mg-short', false);
 W.quizCats = (store.get('quiz-cats', QUIZ_CATS) || []).filter(c => QUIZ_CATS.includes(c));
@@ -170,6 +182,8 @@ function onPhoneMsg(conn, msg) {
   switch (msg.t) {
     case 'in':
       if (typeof msg.q === 'number') { if (msg.q <= l.seq && l.seq - msg.q < 1000) break; l.seq = msg.q; }
+      l.lastIn = performance.now();
+      if (l.stale) { l.stale = false; toast(`${l.name} è di nuovo collegato`); }
       l.input.steer = Math.max(-1, Math.min(1, Number(msg.s) || 0));
       l.input.drift = !!msg.d; l.input.brake = !!msg.b;
       if (msg.k) l.input.trick = true;
@@ -180,9 +194,10 @@ function onPhoneMsg(conn, msg) {
       break;
     case 'use': useCard(l.slot, Number(msg.i), msg.to == null ? null : Number(msg.to)); break;
     case 'combo': comboCards(l.slot, Number(msg.a), Number(msg.b)); break;
-    case 'discard': discardFor(l.slot, Number(msg.i)); break;
     case 'mg': if (W.pit && msg.s && typeof msg.s === 'object' && msg.s.id === W.pit.id && JSON.stringify(msg.s).length < 3000) l.mg = msg.s; break;
     case 'offer': pickOffer(l.slot, msg.pick); break;
+    case 'pitskip': command(l.slot, { t: 'pitskip', id: msg.id, stage: msg.stage }); break;
+    case 'lampo': if (W.lampo && msg.id === W.lampo.id) toMaster({ t: 'lampo', slot: l.slot, id: msg.id }); break;
     case 'leave':
       command(l.slot, { t: 'leave' });
       locals.delete(l.cid);
@@ -213,6 +228,12 @@ function vibrate(slot, pattern) {
   if (l) send(l.conn, { t: 'vib', p: pattern });
 }
 
+function placeOf(slot) {
+  if (MASTER) { const k = karts.get(slot); return k ? k.place : 0; }
+  const wk = W.karts.find(q => q.slot === slot);
+  return wk ? wk.place : 0;
+}
+
 function pushStatus(force) {
   const now = performance.now();
   if (!force && now - (pushStatus.last || 0) < 150) return;
@@ -227,8 +248,8 @@ function pushStatus(force) {
       place: MASTER ? (k ? k.place : 0) : (wk ? wk.place : 0), lap: k ? Math.max(1, Math.min(W.laps, k.lapCount)) : 0,
       finished: k ? k.finished : false, air: k ? k.air : false,
       results: W.phase === 'podium' ? W.results : undefined,
-      pit: pitInfo(l.slot), offer: offerInfo(l.slot),
-      hand: handInfo(l.slot), others: W.players.filter(p => p.slot !== l.slot).map(p => ({ slot: p.slot, name: p.name, color: p.color })),
+      pit: pitInfo(l.slot), offer: offerInfo(l.slot), lampo: lampoInfo(l.slot),
+      hand: handInfo(l.slot), others: W.players.filter(p => p.slot !== l.slot).map(p => ({ slot: p.slot, name: p.name, color: p.color, place: placeOf(p.slot) })),
     });
   }
 }
@@ -281,6 +302,7 @@ function handleCommand(slot, msg) {
     case 'lobby': if (cap) toLobby(); break;
     case 'laps': if (cap && [1, 3, 5].includes(msg.n) && W.phase === 'lobby') { W.laps = msg.n; drawLobby(); } break;
     case 'leave': if (W.phase === 'lobby' || W.phase === 'podium') removePlayer(slot); break;
+    case 'pitskip': if (W.pit && W.pit.id === msg.id && W.pit.stage === msg.stage) W.pit.skips[slot] = msg.stage; break;
   }
   pushStatus(true);
 }
@@ -426,7 +448,7 @@ function startRace() {
   W.raceId = Date.now() % 1e9;
   W.phase = 'intro'; W.introT = 0; W.raceTime = 0; W.countdown = COUNTDOWN; W.results = [];
   W.portals = PORTAL_FRACTIONS.map(() => 0); W.hazards = []; W.missiles = []; W.feed = [];
-  W.pit = null; W.pitsDone = 0; W.pitUsed = []; mgStates.clear(); botMg.clear(); appliedPrizes.clear();
+  W.pit = null; W.lampo = null; W.pitsDone = 0; W.pitUsed = []; mgStates.clear(); botMg.clear(); appliedPrizes.clear();
   firstFinishAt = -1; finishT = 0;
   for (const l of locals.values()) if (l.brain) l.brain = newBrain(cpuLevel);
   buildKarts();
@@ -446,7 +468,7 @@ function buildKarts() {
 }
 
 function toLobby() {
-  W.pit = null;
+  W.pit = null; W.lampo = null;
   W.phase = 'lobby'; karts.clear(); remoteBuf.clear(); W.grid = [];
   setPause(false);
   W.players = W.players.filter(p => p.connected);
@@ -535,7 +557,20 @@ function cpuThink(countdownLeft) {
   }
 }
 
+// se un telefono smette di mandare comandi, non lascio il kart con un tasto "incastrato"
+function inputWatchdog() {
+  const t = performance.now();
+  for (const l of locals.values()) {
+    if (!l.conn || l.slot < 0 || !l.lastIn) continue;
+    if (t - l.lastIn > 1200) {
+      l.input = { steer: 0, drift: false, brake: false, trick: false };
+      if (!l.stale && ['countdown', 'race'].includes(W.phase)) { l.stale = true; toast(`${l.name} si sta ricollegando…`, 4000); }
+    }
+  }
+}
+
 function simStep() {
+  inputWatchdog();
   const kb = locals.get('kbd-' + myId);
   if (kb) {
     kb.input.steer = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
@@ -587,6 +622,7 @@ function simStep() {
       const l = localBySlot(k.slot);
       if (!l) { others.push(k); continue; }
       mine.push(k);
+      if (lampoLocal(k)) { k.speed = 0; k.stopT = Math.max(k.stopT || 0, 0.1); k.drifting = false; }
       stepKart(track, k, l.input, DT, 'race');
       l.input.trick = false;
       if (!k.finished && k.lapCount > W.laps) {
@@ -608,13 +644,14 @@ function simStep() {
         else if (e === 'land') vibrate(k.slot, [25]);
         else if (e === 'trick') vibrate(k.slot, [20, 30, 20]);
         else if (e === 'spin') vibrate(k.slot, [250]);
-        else if (e === 'boom') { vibrate(k.slot, [400]); toMaster({ t: 'feed', text: `BOOM! La bomba è esplosa a ${nameOf(k.slot)}` }); }
+        else if (e === 'boom') { audio.play('boom'); vibrate(k.slot, [400]); toMaster({ t: 'feed', text: `BOOM! La bomba è esplosa a ${nameOf(k.slot)}` }); }
       }
       k.events.length = 0;
     }
     if (MASTER) {
       updatePlaces();
-      if (W.phase === 'race') checkPit();
+      lampoMaster();
+      if (W.phase === 'race' && !W.lampo) checkPit();
       const all = [...karts.values()];
       const allDone = all.length && all.every(k => k.finished);
       const timeUp = firstFinishAt >= 0 && W.raceTime - firstFinishAt > AFTER_FIRST;
@@ -638,7 +675,7 @@ function compact(k) {
 function worldMsg() {
   W.q++;
   return {
-    portals: W.portals, hazards: W.hazards, missiles: W.missiles, feed: W.feed, pit: W.pit, pitsDone: W.pitsDone,
+    portals: W.portals, hazards: W.hazards, missiles: W.missiles, feed: W.feed, pit: W.pit, pitsDone: W.pitsDone, lampo: W.lampo,
     t: 'w', q: W.q, raceId: W.raceId, phase: W.phase, laps: W.laps, raceTime: W.raceTime, countdown: W.countdown,
     introT: W.introT, paused: W.paused, pauseMsg: W.pauseMsg, captain: W.captain, grid: W.grid, results: W.results,
     players: W.players.map(p => ({ slot: p.slot, cid: p.cid, name: p.name, color: p.color, station: p.station, connected: p.connected, kbd: p.kbd, cpu: p.cpu })),
@@ -688,15 +725,17 @@ function renderSnap() {
     introT: Math.min(1, clock.introT / INTRO_TIME), paused: W.paused, karts: list,
     portals: W.portals.map(u => !(u > clock.raceTime)), hazards: W.hazards.filter(h => h.kind !== 'trap'), missiles: W.missiles,
     feed: W.feed.map(f => f.text), pit: W.phase === 'pit' ? pitView() : null,
+    notes: notes.filter(n => n.until > performance.now()), pitAt: W.lampo ? null : nextPitAt(),
+    lampo: W.lampo && W.phase === 'race' ? { mission: W.lampo.mission, done: W.lampo.done, t: clock.raceTime - W.lampo.t0 } : null,
   };
 }
 
 function playerList() {
-  return W.players.map(p => ({ slot: p.slot, name: p.name, color: p.color, here: isLocalSlot(p.slot) && !p.cpu }));
+  return W.players.map(p => ({ slot: p.slot, name: p.name, color: p.color, here: isLocalSlot(p.slot) && !p.cpu, cpu: !!p.cpu, kbd: !!p.kbd }));
 }
 
 // ------------------------------------------------------------------ carte
-const hands = new Map();          // slot -> { cards: [], cd, pending, pendingT } (solo piloti di questo schermo)
+const hands = new Map();          // slot -> { cards: [], cd, offer } (solo piloti di questo schermo)
 const hitHazards = new Set();     // macchie d'olio già prese da un mio kart (in attesa che il PC le tolga)
 let fxId = 0;
 
@@ -716,34 +755,22 @@ function toStation(sid, msg) {
 
 function handOf(slot) {
   let h = hands.get(slot);
-  if (!h) { h = { cards: [], cd: 0, pending: null, pendingT: 0 }; hands.set(slot, h); }
+  if (!h) { h = { cards: [], cd: 0 }; hands.set(slot, h); }
   return h;
 }
 function handInfo(slot) {
   const h = hands.get(slot);
-  if (!h) return { cards: [], cd: 0, pending: null };
-  return { cards: h.cards, cd: Math.max(0, Math.round(h.cd * 10) / 10), pending: h.pending };
+  if (!h) return { cards: [], cd: 0 };
+  return { cards: h.cards, cd: Math.max(0, Math.round(h.cd * 10) / 10) };
 }
 
 function addCard(slot, id) {
   if (!isLocalSlot(slot) || !CARDS[id]) return;
   const h = handOf(slot);
-  if (h.cards.length < HAND_SIZE) h.cards.push(id);
-  else if (h.pending) (h.queue = h.queue || []).push(id);
-  else { h.pending = id; h.pendingT = 4; }  // mano piena: il telefono chiede cosa scartare
+  if (h.cards.length >= HAND_SIZE) return;   // mano piena: la carta va persa
+  h.cards.push(id);
+  audio.play('card');
   vibrate(slot, [30, 40, 30]);
-  pushStatus(true);
-}
-
-function nextPending(h) {
-  if (h.queue && h.queue.length) { h.pending = h.queue.shift(); h.pendingT = 4; }
-}
-
-function discardFor(slot, i) {
-  const h = hands.get(slot);
-  if (!h || !h.pending || !(i >= 0 && i < h.cards.length)) return;
-  h.cards[i] = h.pending; h.pending = null;
-  nextPending(h);
   pushStatus(true);
 }
 
@@ -859,6 +886,14 @@ function onMasterCmd(msg, sid) {
       break;
     }
     case 'swapback': if (owns(msg.from)) sendFx(msg.to, msg.from, 'swapto', msg.pos); break;
+    case 'lampo': if (owns(msg.slot)) lampoDone(msg.slot, msg.id); break;
+    case 'hitok': {
+      // il bersaglio è stato colpito davvero: lo dico a chi ha lanciato la carta
+      if (!owns(msg.to) || msg.from == null || msg.from === msg.to) return;
+      const st2 = stationOf(msg.from);
+      if (st2) toStation(st2, { t: 'hitnote', slot: msg.from, name: nameOf(msg.to) });
+      break;
+    }
     case 'give': if (owns(msg.from)) { const st = stationOf(msg.to); if (st) toStation(st, { t: 'card', slot: msg.to, card: msg.card }); } break;
     case 'bomb': if (owns(msg.from)) sendFx(msg.to, msg.from, 'bomb', { left: msg.left }); break;
     case 'hazard-hit': W.hazards = W.hazards.filter(h => h.id !== msg.id); break;
@@ -888,6 +923,11 @@ function masterCardsStep() {
 // ---- ogni schermo: effetti sui propri kart
 function onStationCmd(msg) {
   switch (msg.t) {
+    case 'hitnote':
+      if (!isLocalSlot(msg.slot)) return;
+      addNote(msg.slot, `COLPITO: ${msg.name}`, 'ok');
+      vibrate(msg.slot, [30, 40, 30, 40, 90]);
+      break;
     case 'card': addCard(msg.slot, msg.card); break;
     case 'fx': {
       const k = karts.get(msg.to);
@@ -895,7 +935,7 @@ function onStationCmd(msg) {
       if (msg.kind === 'swapto') { teleport(k, msg.data); vibrate(msg.to, [80, 40, 80]); return; }
       if (msg.kind === 'bomb') {
         const r = receive(k, 'bomb');
-        if (r === 'ok') { k.bombT = Math.max(1, msg.data.left || 5); k.bombHold = 1; vibrate(msg.to, [60, 30, 60]); }
+        if (r === 'ok') { k.bombT = BOMB_TIME; k.bombHold = BOMB_HOLD; vibrate(msg.to, [60, 30, 60]); }
         else toMaster({ t: 'result', to: msg.to, from: msg.from, kind: 'bomb', res: r, data: msg.data });
         return;
       }
@@ -905,12 +945,14 @@ function onStationCmd(msg) {
         const mine = { s: k.s, lat: k.lat, lapCount: k.lapCount };
         teleport(k, msg.data);
         vibrate(msg.to, [80, 40, 80]);
+        gotHit(msg.to, msg.from);
         toMaster({ t: 'swapback', from: msg.to, to: msg.from, pos: mine });
         return;
       }
       const r = receive(k, msg.kind);
       if (r !== 'ok') { toMaster({ t: 'result', to: msg.to, from: msg.from, kind: msg.kind, res: r, data: msg.data }); return; }
       vibrate(msg.to, [150]);
+      gotHit(msg.to, msg.from);
       if (msg.kind === 'thief' || msg.kind === 'missile1') {
         const h = hands.get(msg.to);
         if (h && h.cards.length) {
@@ -924,18 +966,31 @@ function onStationCmd(msg) {
   }
 }
 
+// scritte "COLPITO" nei riquadri
+const notes = [];
+let noteId = 0;
+function addNote(slot, text, cls) {
+  const t = performance.now();
+  notes.push({ id: ++noteId, slot, text, cls, until: t + 2500 });
+  while (notes.length && notes[0].until < t) notes.shift();
+}
+function gotHit(victim, from) {
+  if (from == null || from === victim) return;
+  addNote(victim, `COLPITO DA ${nameOf(from)}`, 'bad');
+  toMaster({ t: 'hitok', from, to: victim });
+}
+
 function cardsStep(mine, now) {
   const L = track.length;
   for (const k of mine) {
     const h = handOf(k.slot);
     if (h.cd > 0) h.cd = Math.max(0, h.cd - DT);
-    if (h.pending) { h.pendingT -= DT; if (h.pendingT <= 0) { h.pending = null; nextPending(h); pushStatus(true); } }
     // portali: passo sopra → chiedo una carta (decide il PC principale chi è arrivato prima)
     if (k.lapCount >= 1 && !k.finished) {
       PORTAL_FRACTIONS.forEach((f, pi) => {
         const ps = f * L;
         const crossed = k.prevS < ps && k.s >= ps && k.s - k.prevS < 20;
-        if (crossed && Math.abs(k.lat) < track.halfWidth + 1 && !(W.portals[pi] > now)) toMaster({ t: 'portal', slot: k.slot, pi });
+        if (crossed && Math.abs(k.lat) < track.halfWidth + 1 && !(W.portals[pi] > now) && h.cards.length < HAND_SIZE) toMaster({ t: 'portal', slot: k.slot, pi });
       });
     }
     // olio e trappole a terra
@@ -946,7 +1001,7 @@ function cardsStep(mine, now) {
       hitHazards.add(hz.id);
       const r = receive(k, hz.kind);
       if (r === 'mirror') k.mirror = 0;
-      if (r === 'ok') vibrate(k.slot, [150]);
+      if (r === 'ok') { vibrate(k.slot, [150]); if (hz.owner != null && hz.owner !== k.slot) gotHit(k.slot, hz.owner); }
       toMaster({ t: 'hazard-hit', id: hz.id });
     }
     // bomba: si passa toccando un altro kart
@@ -955,7 +1010,7 @@ function cardsStep(mine, now) {
       const other = k.contacts[0];
       const ok = karts.get(other);
       if (ok && isLocalSlot(other)) {
-        if (receive(ok, 'bomb') === 'ok') { ok.bombT = k.bombT; ok.bombHold = 1; k.bombT = 0; vibrate(other, [60, 30, 60]); }
+        if (receive(ok, 'bomb') === 'ok') { ok.bombT = BOMB_TIME; ok.bombHold = BOMB_HOLD; k.bombT = 0; vibrate(other, [60, 30, 60]); }
       } else {
         toMaster({ t: 'bomb', from: k.slot, to: other, left: k.bombT });
         k.bombT = 0;
@@ -974,7 +1029,7 @@ function onPhaseChange() {
   $('pit').classList.toggle('hidden', W.phase !== 'pit');
   $('lobby').classList.toggle('hidden', W.phase !== 'lobby');
   $('podium').classList.toggle('hidden', W.phase !== 'podium');
-  if (W.phase === 'podium') drawPodium();
+  if (W.phase === 'podium') { drawPodium(); replay.t0 = 0; }
   if (W.phase === 'lobby') { karts.clear(); remoteBuf.clear(); currentRace = 0; drawLobby(); }
 }
 
@@ -1214,12 +1269,18 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  const snap = renderSnap();
+  let snap = renderSnap();
   // in automatico ogni schermo mostra solo i piloti collegati a lui
   const players = playerList();
   const here = players.filter(p => p.here);
-  const slots = W.phase === 'lobby' ? [-1] : screen.slots(screen.mode === 'auto' && here.length ? here : players);
+  let slots = W.phase === 'lobby' ? [-1] : screen.slots(screen.mode === 'auto' && here.length ? here : players);
+  recordReplay(snap, now);
+  if (W.phase === 'podium') {
+    const r = replaySnap(now);
+    if (r) { snap = r.snap; slots = [r.slot]; }
+  }
   try { view.render(snap, slots, dt); } catch (e) { console.error(e); }
+  try { audio.update(snap, here.length ? here[0].slot : (players[0] ? players[0].slot : -1), dt); } catch (e) { console.error(e); }
   if (W.phase === 'pit' && now - (frame.pitAt || 0) > 100) { frame.pitAt = now; try { drawPit($('pit'), pitView(), W.players); } catch (e) { console.error(e); } }
   try { bc.postMessage({ t: 'snap', snap, players }); } catch (e) { /* niente */ }
 }
@@ -1229,6 +1290,13 @@ const mgStates = new Map();       // (PC principale) slot -> stato del minigioco
 const botMg = new Map();          // slot -> cervello del minigioco (computer e tastiera di questo schermo)
 const appliedPrizes = new Set();  // premi già consegnati (id pit : slot)
 const isBot = (l) => !!(l.brain || l.cid.startsWith('kbd'));
+
+// distanza di gara (in metri) del prossimo pit stop, o null se non ce ne sono più
+function nextPitAt() {
+  const laps = pitLaps(W.laps);
+  if (W.pitsDone >= laps.length || !['race', 'countdown'].includes(W.phase)) return null;
+  return (laps[W.pitsDone] - 1 + PIT_FRACTION) * track.length;
+}
 
 function checkPit() {
   const laps = pitLaps(W.laps);
@@ -1241,6 +1309,9 @@ function checkPit() {
 
 function startPit() {
   const forced = params.get('mg');
+  W.pitsDone++;
+  if (forced === 'lampo' || (!(forced && GAMES[forced]) && Math.random() < LAMPO_CHANCE)) { W.pitsDone--; startLampo(); return; }
+  W.pitsDone--;
   const pool = GAME_IDS.filter(g => !W.pitUsed.includes(g));
   const game = forced && GAMES[forced] ? forced : pool[Math.floor(Math.random() * pool.length)];
   W.pitUsed.push(game);
@@ -1249,7 +1320,7 @@ function startPit() {
   const seed = Math.floor(Math.random() * 1e9);
   W.pit = {
     id: (Date.now() % 1e9) + W.pitsDone, n: W.pitsDone, of: pitLaps(W.laps).length, game, seed, short,
-    stage: 'intro', stageT: 0, t: 0, dur: gameDuration(game, short), rounds: gameRounds(game, short),
+    stage: 'intro', stageT: 0, t: 0, dur: gameDuration(game, short), rounds: gameRounds(game, short), skips: {},
     round: -1, roundT: 0, rt: 0, reveal: null, revealT: 0, pts: {}, live: [], results: null, tie: null, tieLive: null,
   };
   quizSecret = [];
@@ -1276,6 +1347,13 @@ function pitView() {
   };
 }
 
+function lampoInfo(slot) {
+  const Lm = W.lampo;
+  if (!Lm || W.phase !== 'race') return null;
+  const el = (MASTER ? W.raceTime : raceClock().raceTime) - Lm.t0;
+  return { id: Lm.id, mission: Lm.mission, seed: Lm.seed, n: Lm.n, of: Lm.of, done: Lm.done[slot] != null || el > LAMPO_MAX, t: Math.round(el * 10) / 10 };
+}
+
 function pitInfo(slot) {
   if (W.phase !== 'pit' || !W.pit) return null;
   const P = pitView();
@@ -1284,6 +1362,7 @@ function pitInfo(slot) {
     id: P.id, n: P.n, of: P.of, game: P.game, seed: P.seed, short: P.short, stage: P.stage, stageT: r2(P.stageT), t: r2(P.t), dur: P.dur,
     rounds: P.rounds, round: P.round, roundT: r2(P.roundT), reveal: P.reveal, pts: P.pts[slot] || 0, me, places: P.results ? P.results.length : 0,
     q: P.qs && P.round >= 0 ? P.qs[P.round] : null, duel: P.duel || null, tie: P.tie,
+    skipped: !!(P.skips && P.skips[slot] === P.stage), canSkip: P.stage === 'intro' || P.stage === 'results',
   };
 }
 
@@ -1319,7 +1398,9 @@ function pitStep() {
   const g = GAMES[P.game];
   const st = (slot) => mgStates.get(slot) || {};
   if (P.stage === 'intro') {
-    if (P.stageT >= PIT_INTRO) {
+    if (P.stageT >= PIT_INTRO || allSkipped(P)) { P.stage = 'count'; P.stageT = 0; pushStatus(true); }
+  } else if (P.stage === 'count') {
+    if (P.stageT >= PIT_COUNT) {
       P.stage = 'play'; P.stageT = 0; P.t = 0;
       if (g.rounds || g.duel) { P.round = 0; P.roundT = 0; P.rt = g.duel ? semRoundTime(P.seed, 0) : g.roundTime; }
       if (g.duel && P.duel.over) endPlay();
@@ -1353,17 +1434,65 @@ function pitStep() {
     }
     P.live = W.players.map(p => ({
       slot: p.slot, label: liveLabel(P.game, st(p.slot), P, p.slot), bar: liveBar(P.game, st(p.slot), P, p.slot, maxPts),
-      out: !!st(p.slot).out, done: !!st(p.slot).done,
+      out: !!st(p.slot).out, done: !!st(p.slot).done, v: liveState(P.game, st(p.slot)),
     }));
   } else if (P.stage === 'tie') {
     P.tieLive = {};
     for (const slot of P.tie.slots) P.tieLive[slot] = st(slot).tie || 0;
     if (P.stageT >= TIE_INTRO + TIE_TAP + 0.6) finishRanking(applyTie(P.preRank, P.tieLive, P.seed));
   } else if (P.stage === 'results') {
-    if (P.stageT >= PIT_RESULTS) { P.stage = 'go'; P.stageT = 0; pushStatus(true); }
+    if (P.stageT >= PIT_RESULTS || allSkipped(P)) { P.stage = 'go'; P.stageT = 0; pushStatus(true); }
   } else if (P.stage === 'go') {
     if (P.stageT >= PIT_GO) { W.phase = 'race'; P.stage = 'done'; onPhaseChange(); pushStatus(true); }
   }
+}
+
+// SALTA: si va avanti quando tutte le persone l'hanno premuto (computer e tastiera non contano)
+function allSkipped(P) {
+  if (P.stageT < PIT_MIN_SKIP) return false;
+  const humans = W.players.filter(p => p.connected && !p.cpu && !p.kbd);
+  if (!humans.length) return P.stageT >= 3;
+  return humans.every(p => P.skips[p.slot] === P.stage);
+}
+
+// ------------------------------------------------------------------ minigioco lampo
+// la gara si ferma per tutti; chi finisce la missione riparte subito, gli altri quando la finiscono
+function startLampo() {
+  W.pitsDone++;
+  const mission = LAMPO_IDS[Math.floor(Math.random() * LAMPO_IDS.length)];
+  W.lampo = { id: (Date.now() % 1e9) + 7 * W.pitsDone, mission, seed: Math.floor(Math.random() * 1e9), t0: W.raceTime, done: {}, n: W.pitsDone, of: pitLaps(W.laps).length };
+  pushFeed(`MINIGIOCO LAMPO: ${LAMPO[mission].title}`);
+  pushStatus(true);
+}
+function lampoMaster() {
+  const Lm = W.lampo;
+  if (!Lm) return;
+  const el = W.raceTime - Lm.t0;
+  const all = W.players.every(p => Lm.done[p.slot] != null);
+  if (all || el > LAMPO_MAX + 1) { W.lampo = null; pushStatus(true); }
+}
+function lampoDone(slot, id) {
+  const Lm = W.lampo;
+  if (!Lm || Lm.id !== id || Lm.done[slot] != null) return;
+  Lm.done[slot] = Math.round((W.raceTime - Lm.t0) * 10) / 10;
+  const first = Object.keys(Lm.done).length === 1;
+  pushFeed(`${nameOf(slot)} ${first ? 'riparte per primo' : 'riparte'}! (${Lm.done[slot].toFixed(1)} s)`);
+  pushStatus(true);
+}
+// su ogni schermo: tengo fermi i miei kart finché non finiscono la missione; i computer la finiscono da soli
+const lampoBots = new Map();
+function lampoLocal(k) {
+  const Lm = W.lampo;
+  if (!Lm) return false;
+  const el = (MASTER ? W.raceTime : raceClock().raceTime) - Lm.t0;
+  if (Lm.done[k.slot] != null || el > LAMPO_MAX) return false;
+  const l = localBySlot(k.slot);
+  if (l && isBot(l)) {
+    let b = lampoBots.get(k.slot);
+    if (!b || b.id !== Lm.id) { b = { id: Lm.id, at: cpuLampoTime(l.brain ? cpuLevel : 'normale', rng(Lm.seed + k.slot)), sent: 0 }; lampoBots.set(k.slot, b); }
+    if (el >= b.at && performance.now() - b.sent > 300) { b.sent = performance.now(); toMaster({ t: 'lampo', slot: k.slot, id: Lm.id }); }
+  }
+  return true;
 }
 
 function resolveRound() {
@@ -1462,8 +1591,44 @@ function pitEnded() {
   for (const l of locals.values()) l.mg = null;
 }
 
+// ------------------------------------------------------------------ replay dell'arrivo (dietro alla classifica)
+const replay = { frames: [], race: 0, lastAt: 0, finishAt: -1, t0: 0 };
+const RF = ['x', 'y', 'z', 'yaw', 'speed', 'drifting', 'driftDir', 'driftT', 'driftCharge', 'boostT', 'boostKind', 'spinT', 'hop', 'air', 'vy', 'trickT',
+  'shieldT', 'mirror', 'ghostT', 'miniT', 'bombT', 'slot', 'name', 'color', 'place', 'finished', 'finishTime', 'lapCount', 's', 'lat'];
+function recordReplay(snap, now) {
+  if (!['race', 'finish'].includes(snap.phase)) return;
+  if (replay.race !== W.raceId) { replay.frames = []; replay.race = W.raceId; replay.finishAt = -1; }
+  if (now - replay.lastAt < 50) return;
+  replay.lastAt = now;
+  replay.frames.push({ at: now, karts: snap.karts.map(k => { const o = {}; for (const f of RF) o[f] = k[f]; return o; }), missiles: snap.missiles, hazards: snap.hazards });
+  if (replay.finishAt < 0 && snap.karts.some(k => k.finished)) replay.finishAt = now;
+  const keep = replay.finishAt >= 0 ? replay.finishAt - 7000 : now - 12000;
+  while (replay.frames.length && replay.frames[0].at < keep) replay.frames.shift();
+}
+function replaySnap(now) {
+  const F = replay.frames;
+  if (F.length < 10 || replay.race !== W.raceId) return null;
+  const end = replay.finishAt >= 0 ? Math.min(F[F.length - 1].at, replay.finishAt + 2500) : F[F.length - 1].at;
+  const start = Math.max(F[0].at, end - 8000);
+  if (!replay.t0) replay.t0 = now;
+  // al rallentatore (metà velocità), a ripetizione
+  const span = end - start;
+  const t = start + (((now - replay.t0) * 0.5) % span);
+  let i = 0;
+  while (i < F.length - 2 && F[i + 1].at < t) i++;
+  const a = F[i], b = F[i + 1] || a;
+  const u = Math.max(0, Math.min(1, (t - a.at) / Math.max(1, b.at - a.at)));
+  const karts = a.karts.map(ka => {
+    const kb = b.karts.find(q => q.slot === ka.slot) || ka;
+    let dy = kb.yaw - ka.yaw; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
+    return { ...ka, x: ka.x + (kb.x - ka.x) * u, y: ka.y + (kb.y - ka.y) * u, z: ka.z + (kb.z - ka.z) * u, yaw: ka.yaw + dy * u, wrongWay: 0, finished: false };
+  });
+  const win = W.results && W.results[0] ? W.results[0].slot : (karts[0] ? karts[0].slot : -1);
+  return { slot: win, snap: { phase: 'replay', laps: W.laps, raceTime: 0, countdown: 0, introT: 0, paused: false, karts, portals: W.portals.map(() => true), hazards: a.hazards || [], missiles: a.missiles || [], feed: [], notes: [] } };
+}
+
 // solo per i test (pc.html?debug=1)
-if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, track, mgStates, startPit };
+if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, track, mgStates, startPit, view };
 
 drawLobby();
 startNet();

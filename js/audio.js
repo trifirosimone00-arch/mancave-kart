@@ -1,0 +1,215 @@
+// Audio della TV, tutto generato nel browser (niente file da scaricare, niente diritti):
+// motori stile MotoGP/F1, gomme che stridono, effetti delle carte e una musica di sottofondo
+// allegra e avventurosa, tenuta bassa sotto i motori.
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('mck-' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('mck-' + k, JSON.stringify(v)); } catch (e) { /* niente */ } },
+};
+
+export function createAudio() {
+  let ctx = null, master = null, sfxBus = null, musicBus = null, engineBus = null, noiseBuf = null, shaper = null;
+  let volume = store.get('volume', 0.7);
+  const voices = new Map();      // slot -> voce del motore
+  let tyre = null;
+  let music = null;
+  let lastCount = 0, lastMissiles = new Set(), lastNotes = new Set(), lastPhase = '';
+
+  function ensure() {
+    if (ctx) return true;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    ctx = new AC();
+    master = ctx.createGain(); master.gain.value = volume; master.connect(ctx.destination);
+    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4; comp.connect(master);
+    engineBus = ctx.createGain(); engineBus.gain.value = 0.9; engineBus.connect(comp);
+    sfxBus = ctx.createGain(); sfxBus.gain.value = 0.55; sfxBus.connect(comp);
+    musicBus = ctx.createGain(); musicBus.gain.value = 0.16; musicBus.connect(comp);
+    // rumore bianco riutilizzabile
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    // distorsione leggera: il motore diventa "ruvido"
+    shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 2.6); }
+    shaper.curve = curve;
+    shaper.connect(engineBus);
+    return true;
+  }
+  // il browser fa partire l'audio solo dopo un tocco o un tasto
+  const unlock = () => { if (ensure() && ctx.state === 'suspended') ctx.resume(); };
+  window.addEventListener('pointerdown', unlock);
+  window.addEventListener('keydown', unlock);
+
+  function setVolume(v) {
+    volume = Math.max(0, Math.min(1, v));
+    store.set('volume', volume);
+    if (master) master.gain.setTargetAtTime(volume, ctx.currentTime, 0.05);
+  }
+
+  // ---------------------------------------------------------------- motori
+  function makeVoice() {
+    const o1 = ctx.createOscillator(); o1.type = 'sawtooth';
+    const o2 = ctx.createOscillator(); o2.type = 'square';
+    const o3 = ctx.createOscillator(); o3.type = 'sawtooth';
+    const g2 = ctx.createGain(); g2.gain.value = 0.35;
+    const g3 = ctx.createGain(); g3.gain.value = 0.25;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 3;
+    const out = ctx.createGain(); out.gain.value = 0;
+    o1.connect(lp); o2.connect(g2).connect(lp); o3.connect(g3).connect(lp);
+    lp.connect(out).connect(shaper);
+    o1.start(); o2.start(); o3.start();
+    return { o1, o2, o3, lp, out, rpm: 0, gear: 1 };
+  }
+  // marce: il giro motore sale e ricade a ogni cambio, come in moto
+  const GEARS = [0, 7, 13, 18.5, 23.5, 28, 40];
+  function rpmOf(v, speed) {
+    const s = Math.max(0, speed);
+    let gIdx = 1;
+    while (gIdx < GEARS.length - 1 && s > GEARS[gIdx]) gIdx++;
+    const lo = GEARS[gIdx - 1], hi = GEARS[gIdx];
+    v.gear = gIdx;
+    return 0.28 + 0.72 * Math.min(1, (s - lo) / Math.max(1, hi - lo));
+  }
+  function updateEngines(snap, me, dt) {
+    const racing = ['countdown', 'race', 'finish'].includes(snap.phase);
+    const t = ctx.currentTime;
+    const seen = new Set();
+    for (const k of snap.karts || []) {
+      seen.add(k.slot);
+      let v = voices.get(k.slot);
+      if (!v) { v = makeVoice(); voices.set(k.slot, v); }
+      const target = rpmOf(v, Math.abs(k.speed || 0)) + (k.boostT > 0 ? 0.12 : 0);
+      v.rpm += (target - v.rpm) * Math.min(1, dt * (target < v.rpm ? 14 : 6));
+      const f = 70 + v.rpm * 330;                      // tono acuto, tipo MotoGP
+      v.o1.frequency.setTargetAtTime(f, t, 0.03);
+      v.o2.frequency.setTargetAtTime(f * 0.5, t, 0.03);
+      v.o3.frequency.setTargetAtTime(f * 2.01, t, 0.03);
+      v.lp.frequency.setTargetAtTime(500 + v.rpm * 2600 + (k.boostT > 0 ? 1500 : 0), t, 0.05);
+      let gain = 0;
+      if (racing) {
+        if (me && k.slot === me.slot) gain = 0.16;
+        else if (me) { const d = Math.hypot(k.x - me.x, k.z - me.z); gain = 0.12 * Math.max(0, 1 - d / 70); }
+        else gain = 0.06;
+        gain *= 0.55 + 0.45 * Math.min(1, Math.abs(k.speed || 0) / 12);
+        if (k.finished && snap.phase === 'finish') gain *= 0.5;
+      }
+      v.out.gain.setTargetAtTime(gain, t, 0.08);
+    }
+    for (const [slot, v] of voices) if (!seen.has(slot)) { v.out.gain.setTargetAtTime(0, t, 0.05); setTimeout(() => { try { v.o1.stop(); v.o2.stop(); v.o3.stop(); } catch (e) { /* niente */ } }, 300); voices.delete(slot); }
+    // gomme che stridono in derapata e in curva stretta
+    if (!tyre) {
+      const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 6;
+      const g = ctx.createGain(); g.gain.value = 0;
+      src.connect(bp).connect(g).connect(sfxBus); src.start();
+      tyre = { g, bp };
+    }
+    let screech = 0;
+    if (racing && me && !me.air) {
+      if (me.drifting) screech = 0.22 + Math.min(0.2, (me.driftCharge || 0) * 0.08);
+      if (me.spinT > 0) screech = 0.35;
+      screech *= Math.min(1, Math.abs(me.speed || 0) / 14);
+    }
+    tyre.g.gain.setTargetAtTime(screech, t, 0.06);
+    tyre.bp.frequency.setTargetAtTime(1500 + (me && me.drifting ? 500 : 0), t, 0.1);
+  }
+
+  // ---------------------------------------------------------------- effetti
+  function tone(type, f0, f1, dur, vol, when = 0) {
+    const t = ctx.currentTime + when;
+    const o = ctx.createOscillator(); o.type = type;
+    const g = ctx.createGain();
+    o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(sfxBus); o.start(t); o.stop(t + dur + 0.05);
+  }
+  function noise(dur, vol, f0, f1, when = 0) {
+    const t = ctx.currentTime + when;
+    const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(f0, t); lp.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(lp).connect(g).connect(sfxBus); s.start(t); s.stop(t + dur + 0.05);
+  }
+  const FX = {
+    beep: () => tone('square', 660, 660, 0.18, 0.18),
+    go: () => { tone('square', 990, 990, 0.45, 0.2); tone('square', 1320, 1320, 0.45, 0.08); },
+    whistle: () => tone('sine', 2200, 500, 0.9, 0.06),                       // razzo che arriva
+    boom: () => { noise(0.6, 0.45, 2200, 80); tone('sine', 120, 40, 0.5, 0.25); },
+    hit: () => { noise(0.25, 0.3, 3000, 300); tone('triangle', 300, 120, 0.2, 0.12); },
+    card: () => { tone('triangle', 880, 1760, 0.12, 0.12); tone('triangle', 1320, 2640, 0.12, 0.08, 0.08); },
+    lap: () => { tone('triangle', 784, 784, 0.12, 0.14); tone('triangle', 1046, 1046, 0.2, 0.14, 0.12); },
+    lastlap: () => { [523, 659, 784, 1046].forEach((f, i) => tone('square', f, f, 0.16, 0.1, i * 0.11)); },
+    finish: () => { [523, 659, 784, 1046, 784, 1046].forEach((f, i) => tone('square', f, f, 0.2, 0.1, i * 0.13)); },
+  };
+  function play(name) { if (ctx && FX[name]) try { FX[name](); } catch (e) { /* niente */ } }
+
+  // ---------------------------------------------------------------- musica: allegra, avventurosa, un po' da sfida
+  // giro di accordi vi-IV-I-V in La minore/Do maggiore, 150 bpm: basso, accordi a scatti e una melodia breve
+  const BPM = 150, STEP = 60 / BPM / 2;               // ottavi
+  const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];  // Am F C G
+  const MELODY = [76, 0, 74, 76, 79, 0, 76, 74, 72, 0, 74, 72, 69, 0, 72, 74,
+                  72, 0, 71, 72, 76, 0, 74, 72, 71, 0, 72, 74, 71, 67, 0, 0];
+  const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  function startMusic() {
+    if (music) return;
+    music = { step: 0, next: ctx.currentTime + 0.1, timer: null };
+    music.timer = setInterval(() => {
+      while (music && music.next < ctx.currentTime + 0.15) { schedule(music.step, music.next); music.step++; music.next += STEP; }
+    }, 30);
+  }
+  function stopMusic() { if (music) { clearInterval(music.timer); music = null; } }
+  function note(type, midi, t, dur, vol) {
+    const o = ctx.createOscillator(); o.type = type; o.frequency.value = mtof(midi);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(musicBus); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function schedule(step, t) {
+    const bar = Math.floor(step / 8) % 4, beat = step % 8;
+    const ch = CHORDS[bar];
+    // basso che spinge
+    note('triangle', ch[0] - 12, t, STEP * 0.9, beat % 2 === 0 ? 0.5 : 0.3);
+    // accordi a scatti sul contrattempo
+    if (beat % 2 === 1) for (const m of ch) note('square', m + 12, t, STEP * 0.5, 0.06);
+    // melodia (ogni 2 giri cambia ottava per non stancare)
+    const mel = MELODY[(step % 32)];
+    if (mel) note('square', mel + (Math.floor(step / 64) % 2 ? 0 : -12), t, STEP * 1.6, 0.11);
+    // batteria finta: cassa e charleston col rumore
+    if (beat % 4 === 0) { const s = ctx.createOscillator(); const g = ctx.createGain(); s.frequency.setValueAtTime(140, t); s.frequency.exponentialRampToValueAtTime(40, t + 0.12); g.gain.setValueAtTime(0.6, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15); s.connect(g).connect(musicBus); s.start(t); s.stop(t + 0.2); }
+    { const s = ctx.createBufferSource(); s.buffer = noiseBuf; const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000; const g = ctx.createGain(); g.gain.setValueAtTime(beat % 2 ? 0.08 : 0.04, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05); s.connect(hp).connect(g).connect(musicBus); s.start(t); s.stop(t + 0.06); }
+  }
+
+  // ---------------------------------------------------------------- ogni fotogramma
+  // me: il kart di chi guarda questo schermo (per il volume dei motori e le gomme)
+  function update(snap, meSlot, dt) {
+    if (!ctx || ctx.state !== 'running') return;
+    const me = (snap.karts || []).find(k => k.slot === meSlot) || null;
+    updateEngines(snap, me, dt);
+    const musicOn = ['intro', 'countdown', 'race', 'pit', 'finish', 'podium'].includes(snap.phase);
+    if (musicOn) startMusic(); else stopMusic();
+    musicBus.gain.setTargetAtTime(snap.phase === 'pit' || snap.phase === 'podium' ? 0.22 : 0.14, ctx.currentTime, 0.3);
+    // conto alla rovescia
+    if (snap.phase === 'countdown') {
+      const n = Math.ceil(snap.countdown);
+      if (n !== lastCount && n >= 1 && n <= 3) play('beep');
+      lastCount = n;
+    } else if (lastPhase === 'countdown' && snap.phase === 'race') play('go');
+    if (snap.phase === 'finish' && lastPhase === 'race') play('finish');
+    lastPhase = snap.phase;
+    // razzi che partono
+    const ms = new Set((snap.missiles || []).map(m => m.id));
+    for (const id of ms) if (!lastMissiles.has(id)) play('whistle');
+    lastMissiles = ms;
+    // colpi
+    for (const n of snap.notes || []) {
+      if (lastNotes.has(n.id)) continue;
+      lastNotes.add(n.id);
+      play(n.cls === 'bad' ? 'boom' : 'hit');
+    }
+    if (lastNotes.size > 200) lastNotes = new Set([...lastNotes].slice(-50));
+  }
+
+  return { update, play, setVolume, volume: () => volume };
+}

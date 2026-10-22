@@ -44,10 +44,11 @@ const POOL = [
   ...['magnet', 'invert', 'fog', 'handbrake', 'mini'].map(id => [id, 7.2]),
   ...['ghost', 'swap', 'bomb', 'thief'].map(id => [id, 3.5]),
 ];
-const TOTAL = POOL.reduce((a, [, w]) => a + w, 0);
-export function drawCard(rand = Math.random) {
-  let r = rand() * TOTAL;
-  for (const [id, w] of POOL) { r -= w; if (r <= 0) return id; }
+// rareMul > 1: più probabilità di carte rare (premio del pit stop)
+export function drawCard(rand = Math.random, rareMul = 1) {
+  const pool = POOL.map(([id, w]) => [id, CARDS[id].rar === 'rara' ? w * rareMul : CARDS[id].rar === 'media' ? w * Math.sqrt(rareMul) : w]);
+  let r = rand() * pool.reduce((a, [, w]) => a + w, 0);
+  for (const [id, w] of pool) { r -= w; if (r <= 0) return id; }
   return POOL[0][0];
 }
 

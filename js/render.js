@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { groundHeight, RAMP_LENGTH } from './track.js';
 import { MT_BLUE, MT_ORANGE } from './sim.js';
 import { PORTAL_FRACTIONS } from './cards.js';
+import { PIT_FRACTION } from './minigames.js';
 
 const TAG_LAYER0 = 1; // layer delle etichette nome: 1 + slot
 
@@ -333,6 +334,35 @@ function buildWorld(scene, track) {
     scene.add(g);
     return { g, arch, card, glow };
   });
+
+  // pit stop: portale a scacchi con l'insegna
+  {
+    const p = pts[Math.floor((PIT_FRACTION * track.length) / track.ds) % count];
+    const g = new THREE.Group();
+    const postMat = new THREE.MeshLambertMaterial({ color: '#2b2f45' });
+    for (const side of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(1.1, 8, 1.1), postMat);
+      post.position.set(side * (hw + 1.5), 4, 0);
+      g.add(post);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 8), new THREE.MeshBasicMaterial({ color: '#ffd400' }));
+      lamp.position.set(side * (hw + 1.5), 8.4, 0);
+      g.add(lamp);
+    }
+    const sign = canvasTex(1024, 160, (c, w, h) => {
+      const sq = 20;
+      for (let x = 0; x < w / sq; x++) for (let y = 0; y < h / sq; y++) { c.fillStyle = (x + y) % 2 ? '#1a1a1a' : '#ffffff'; c.fillRect(x * sq, y * sq, sq, sq); }
+      c.fillStyle = '#ffd400'; c.beginPath(); c.roundRect(150, 22, w - 300, h - 44, 18); c.fill();
+      c.font = '900 84px "Bungee", "Arial Black", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillStyle = '#1a1a1a'; c.fillText('PIT STOP', w / 2, h / 2 + 4);
+    });
+    const board = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 + 4, 2.6, 0.5),
+      [postMat, postMat, postMat, postMat, new THREE.MeshLambertMaterial({ map: sign }), new THREE.MeshLambertMaterial({ map: sign })]);
+    board.position.set(0, 7, 0);
+    g.add(board);
+    g.position.set(p.x, 0, p.z);
+    g.rotation.y = Math.atan2(p.tx, p.tz);
+    scene.add(g);
+  }
 
   // bandierine lungo il rettilineo di partenza
   {

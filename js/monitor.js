@@ -5,6 +5,7 @@ import { buildTrack } from './track.js';
 import { createRenderer } from './render.js';
 import { createScreenConfig, bindScreenBar } from './screen-ui.js';
 import { iceServers, PEER_PREFIX } from './net.js';
+import { drawPit } from './mg-tv.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -153,6 +154,8 @@ function frame(now) {
   if (alive) setWait(s.phase === 'lobby' ? 'Collegato! La gara compare qui appena parte.' : '');
   else if (!remote) setWait('In attesa dello schermo principale…');
   $('pause').classList.toggle('hidden', !s.paused);
+  $('pit').classList.toggle('hidden', s.phase !== 'pit');
+  if (s.phase === 'pit' && now - (frame.pitAt || 0) > 100) { frame.pitAt = now; try { drawPit($('pit'), s.pit, players); } catch (e) { console.error(e); } }
   const slots = s.phase === 'lobby' ? [-1] : screen.slots(players);
   try { view.render(s, slots, dt); } catch (e) { console.error(e); }
 }

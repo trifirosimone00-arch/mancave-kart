@@ -1,6 +1,7 @@
 // Telefono = volante. Manda sterzo e tasti allo schermo, riceve posizione, giri e vibrazioni.
 import { iceServers, PEER_PREFIX } from './net.js';
 import { CARDS, comboOf, HAND_SIZE } from './cards.js';
+import { createMgPhone } from './mg-phone.js';
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#e8322b', '#ff8a00', '#ffcc00', '#2ec46b', '#1fb5c9', '#2f7bff', '#9b5cff', '#ff4fa3'];
 
@@ -27,7 +28,7 @@ const st = {
 
 // ------------------------------------------------------------------ schermate
 function show(id) {
-  for (const s of ['join', 'wait', 'pad', 'end']) $(s).classList.toggle('hidden', s !== id);
+  for (const s of ['join', 'wait', 'pad', 'mg', 'end']) $(s).classList.toggle('hidden', s !== id);
   st.view = id;
   checkRotate();
 }
@@ -112,6 +113,7 @@ function onMotion(e) {
   // scossa = acrobazia sul salto
   const lin = e.acceleration;
   const mag = lin && lin.x != null ? Math.hypot(lin.x, lin.y, lin.z) : 0;
+  if (mg.active()) { mg.shake(mag); return; }
   if (mag > 13 && performance.now() - lastShake > 400) { lastShake = performance.now(); trickPending = true; }
 }
 
@@ -208,9 +210,11 @@ function onData(msg) {
 
 function onStatus(s) {
   st.status = s;
-  const racing = ['intro', 'countdown', 'race', 'finish'].includes(s.phase);
+  const racing = ['intro', 'countdown', 'race', 'pit', 'finish'].includes(s.phase);
   if (s.phase === 'lobby' && st.view !== 'wait') show('wait');
-  if (racing && st.view !== 'pad') show('pad');
+  if (racing && s.phase !== 'pit' && st.view !== 'pad') show('pad');
+  if (s.phase === 'pit' && st.view !== 'mg') show('mg');
+  mg.update(s);
   if (s.phase === 'podium' && st.view !== 'end') show('end');
 
   // attesa
@@ -309,6 +313,9 @@ function goFull() {
 }
 
 show('join');
+
+// minigiochi ai pit stop
+const mg = createMgPhone({ root: $('mg'), send: (m) => send2(m), vib: (p) => navigator.vibrate && navigator.vibrate(p) });
 
 
 // ------------------------------------------------------------------ carte

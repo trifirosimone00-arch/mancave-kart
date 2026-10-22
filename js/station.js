@@ -4,12 +4,14 @@
 // Ogni schermo calcola i kart dei telefoni collegati a lui (niente ritardo nella guida)
 // e scambia via internet solo le posizioni degli altri.
 import { buildTrack } from './track.js';
-import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance, placeAt } from './sim.js';
+import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance, placeAt, giveBoost } from './sim.js';
 import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, PORTAL_COOLDOWN, PORTAL_FRACTIONS } from './cards.js';
 import { createRenderer } from './render.js';
 import { createScreenConfig, bindLayoutButtons, bindScreenBar } from './screen-ui.js';
 import { iceServers, PEER_PREFIX, hasTurn } from './net.js';
 import { CPU_LEVELS, CPU_NAMES, newBrain, cpuInput } from './ai.js';
+import { PIT_FRACTION, PIT_INTRO, PIT_RESULTS, PIT_GO, pitLaps, GAMES, GAME_IDS, gameDuration, rankGame, liveLabel, liveBar, prizeFor, cpuMgNew, cpuMgTick, quizRound } from './minigames.js';
+import { drawPit } from './mg-tv.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -46,6 +48,7 @@ const W = {                       // stato della stanza (sul PC principale è la
   q: 0, raceId: 0, phase: 'lobby', laps: 3, raceTime: 0, countdown: 0, introT: 0,
   paused: false, pauseMsg: '', players: [], grid: [], karts: [], results: [], captain: -1,
   portals: PORTAL_FRACTIONS.map(() => 0), hazards: [], missiles: [], feed: [],
+  pit: null, pitsDone: 0, pitUsed: [],
 };
 let pauseAuto = false, resumeT = 0, firstFinishAt = -1, finishT = 0;
 let worldAt = 0;                  // (schermo collegato) quando è arrivato l'ultimo stato
@@ -173,6 +176,8 @@ function onPhoneMsg(conn, msg) {
     case 'use': useCard(l.slot, Number(msg.i), msg.to == null ? null : Number(msg.to)); break;
     case 'combo': comboCards(l.slot, Number(msg.a), Number(msg.b)); break;
     case 'discard': discardFor(l.slot, Number(msg.i)); break;
+    case 'mg': if (W.pit && msg.s && typeof msg.s === 'object' && msg.s.id === W.pit.id && JSON.stringify(msg.s).length < 3000) l.mg = msg.s; break;
+    case 'offer': pickOffer(l.slot, msg.pick); break;
     case 'leave':
       command(l.slot, { t: 'leave' });
       locals.delete(l.cid);
@@ -217,6 +222,7 @@ function pushStatus(force) {
       place: MASTER ? (k ? k.place : 0) : (wk ? wk.place : 0), lap: k ? Math.max(1, Math.min(W.laps, k.lapCount)) : 0,
       finished: k ? k.finished : false, air: k ? k.air : false,
       results: W.phase === 'podium' ? W.results : undefined,
+      pit: pitInfo(l.slot), offer: offerInfo(l.slot),
       hand: handInfo(l.slot), others: W.players.filter(p => p.slot !== l.slot).map(p => ({ slot: p.slot, name: p.name, color: p.color })),
     });
   }
@@ -259,7 +265,7 @@ function updateCaptain() {
 }
 
 function handleCommand(slot, msg) {
-  const racing = ['intro', 'countdown', 'race', 'finish'].includes(W.phase);
+  const racing = ['intro', 'countdown', 'race', 'pit', 'finish'].includes(W.phase);
   const p = regBySlot(slot);
   const cap = W.captain === slot;
   switch (msg.t) {
@@ -295,6 +301,10 @@ function onStationMsg(conn, msg) {
     case 'c': onMasterCmd(msg.msg || {}, sid); break;
     case 'k':
       if (msg.raceId !== W.raceId) break;
+      if (W.pit && Array.isArray(msg.mg)) for (const m of msg.mg) {
+        const p = regBySlot(m.slot);
+        if (p && p.station === sid && m.s && m.s.id === W.pit.id) mgStates.set(m.slot, m.s);
+      }
       for (const s of msg.karts || []) {
         const p = regBySlot(s.slot);
         if (!p || p.station !== sid) continue;
@@ -411,6 +421,7 @@ function startRace() {
   W.raceId = Date.now() % 1e9;
   W.phase = 'intro'; W.introT = 0; W.raceTime = 0; W.countdown = COUNTDOWN; W.results = [];
   W.portals = PORTAL_FRACTIONS.map(() => 0); W.hazards = []; W.missiles = []; W.feed = [];
+  W.pit = null; W.pitsDone = 0; W.pitUsed = []; mgStates.clear(); botMg.clear(); appliedPrizes.clear();
   firstFinishAt = -1; finishT = 0;
   for (const l of locals.values()) if (l.brain) l.brain = newBrain(cpuLevel);
   buildKarts();
@@ -430,6 +441,7 @@ function buildKarts() {
 }
 
 function toLobby() {
+  W.pit = null;
   W.phase = 'lobby'; karts.clear(); remoteBuf.clear(); W.grid = [];
   setPause(false);
   W.players = W.players.filter(p => p.connected);
@@ -486,7 +498,7 @@ const keys = {};
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   const kb = locals.get('kbd-' + myId);
-  if ((e.code === 'KeyP' || e.code === 'Escape') && ['intro', 'countdown', 'race', 'finish'].includes(W.phase)) {
+  if ((e.code === 'KeyP' || e.code === 'Escape') && ['intro', 'countdown', 'race', 'pit', 'finish'].includes(W.phase)) {
     if (MASTER) setPause(!W.paused, 'Pausa dal PC', false); else if (kb) command(kb.slot, { t: 'pause' });
   }
   if (kb && kb.slot >= 0 && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) {
@@ -543,6 +555,11 @@ function simStep() {
     }
     return;
   }
+  if (W.phase === 'pit') {
+    pitLocalStep();
+    if (MASTER) pitStep();
+    return;
+  }
   if (W.phase === 'countdown') {
     if (MASTER) W.countdown -= DT;
     const left = MASTER ? W.countdown : clock.countdown;
@@ -592,6 +609,7 @@ function simStep() {
     }
     if (MASTER) {
       updatePlaces();
+      if (W.phase === 'race') checkPit();
       const all = [...karts.values()];
       const allDone = all.length && all.every(k => k.finished);
       const timeUp = firstFinishAt >= 0 && W.raceTime - firstFinishAt > AFTER_FIRST;
@@ -615,7 +633,7 @@ function compact(k) {
 function worldMsg() {
   W.q++;
   return {
-    portals: W.portals, hazards: W.hazards, missiles: W.missiles, feed: W.feed,
+    portals: W.portals, hazards: W.hazards, missiles: W.missiles, feed: W.feed, pit: W.pit, pitsDone: W.pitsDone,
     t: 'w', q: W.q, raceId: W.raceId, phase: W.phase, laps: W.laps, raceTime: W.raceTime, countdown: W.countdown,
     introT: W.introT, paused: W.paused, pauseMsg: W.pauseMsg, captain: W.captain, grid: W.grid, results: W.results,
     players: W.players.map(p => ({ slot: p.slot, cid: p.cid, name: p.name, color: p.color, station: p.station, connected: p.connected, kbd: p.kbd, cpu: p.cpu })),
@@ -639,7 +657,11 @@ function netTick(now) {
     W.karts = [...karts.values()].map(k => ({ slot: k.slot, place: k.place }));
   } else if (masterOk && currentRace && W.phase !== 'lobby') {
     const mine = [...karts.values()].filter(k => isLocalSlot(k.slot));
-    if (mine.length) send(masterConn, { t: 'k', q: ++kSeq, raceId: currentRace, karts: mine.map(compact) });
+    if (mine.length) {
+      const msg = { t: 'k', q: ++kSeq, raceId: currentRace, karts: mine.map(compact) };
+      if (W.phase === 'pit') msg.mg = [...locals.values()].filter(l => l.slot >= 0 && l.mg).map(l => ({ slot: l.slot, s: l.mg }));
+      send(masterConn, msg);
+    }
   }
 }
 
@@ -660,7 +682,7 @@ function renderSnap() {
     phase: W.phase, laps: W.laps, raceTime: clock.raceTime, countdown: clock.countdown,
     introT: Math.min(1, clock.introT / INTRO_TIME), paused: W.paused, karts: list,
     portals: W.portals.map(u => !(u > clock.raceTime)), hazards: W.hazards.filter(h => h.kind !== 'trap'), missiles: W.missiles,
-    feed: W.feed.map(f => f.text),
+    feed: W.feed.map(f => f.text), pit: W.phase === 'pit' ? pitView() : null,
   };
 }
 
@@ -702,15 +724,21 @@ function addCard(slot, id) {
   if (!isLocalSlot(slot) || !CARDS[id]) return;
   const h = handOf(slot);
   if (h.cards.length < HAND_SIZE) h.cards.push(id);
+  else if (h.pending) (h.queue = h.queue || []).push(id);
   else { h.pending = id; h.pendingT = 4; }  // mano piena: il telefono chiede cosa scartare
   vibrate(slot, [30, 40, 30]);
   pushStatus(true);
+}
+
+function nextPending(h) {
+  if (h.queue && h.queue.length) { h.pending = h.queue.shift(); h.pendingT = 4; }
 }
 
 function discardFor(slot, i) {
   const h = hands.get(slot);
   if (!h || !h.pending || !(i >= 0 && i < h.cards.length)) return;
   h.cards[i] = h.pending; h.pending = null;
+  nextPending(h);
   pushStatus(true);
 }
 
@@ -896,7 +924,7 @@ function cardsStep(mine, now) {
   for (const k of mine) {
     const h = handOf(k.slot);
     if (h.cd > 0) h.cd = Math.max(0, h.cd - DT);
-    if (h.pending) { h.pendingT -= DT; if (h.pendingT <= 0) { h.pending = null; pushStatus(true); } }
+    if (h.pending) { h.pendingT -= DT; if (h.pendingT <= 0) { h.pending = null; nextPending(h); pushStatus(true); } }
     // portali: passo sopra → chiedo una carta (decide il PC principale chi è arrivato prima)
     if (k.lapCount >= 1 && !k.finished) {
       PORTAL_FRACTIONS.forEach((f, pi) => {
@@ -934,7 +962,11 @@ function cardsStep(mine, now) {
 }
 
 // ------------------------------------------------------------------ interfaccia
+let seenPhase = 'lobby';
 function onPhaseChange() {
+  if (seenPhase === 'pit' && W.phase !== 'pit') pitEnded();
+  seenPhase = W.phase;
+  $('pit').classList.toggle('hidden', W.phase !== 'pit');
   $('lobby').classList.toggle('hidden', W.phase !== 'lobby');
   $('podium').classList.toggle('hidden', W.phase !== 'podium');
   if (W.phase === 'podium') drawPodium();
@@ -1123,11 +1155,209 @@ function frame(now) {
   const here = players.filter(p => p.here);
   const slots = W.phase === 'lobby' ? [-1] : screen.slots(screen.mode === 'auto' && here.length ? here : players);
   try { view.render(snap, slots, dt); } catch (e) { console.error(e); }
+  if (W.phase === 'pit' && now - (frame.pitAt || 0) > 100) { frame.pitAt = now; try { drawPit($('pit'), pitView(), W.players); } catch (e) { console.error(e); } }
   try { bc.postMessage({ t: 'snap', snap, players }); } catch (e) { /* niente */ }
 }
 
+// ------------------------------------------------------------------ pit stop e minigiochi
+const mgStates = new Map();       // (PC principale) slot -> stato del minigioco riportato
+const botMg = new Map();          // slot -> cervello del minigioco (computer e tastiera di questo schermo)
+const appliedPrizes = new Set();  // premi già consegnati (id pit : slot)
+const isBot = (l) => !!(l.brain || l.cid.startsWith('kbd'));
+
+function checkPit() {
+  const laps = pitLaps(W.laps);
+  if (W.pitsDone >= laps.length) return;
+  const at = (laps[W.pitsDone] - 1 + PIT_FRACTION) * track.length;
+  let lead = -Infinity;
+  for (const k of karts.values()) if (!k.finished) lead = Math.max(lead, raceDistance(track, k));
+  if (lead >= at) startPit();
+}
+
+function startPit() {
+  const forced = params.get('mg');
+  const pool = GAME_IDS.filter(g => !W.pitUsed.includes(g));
+  const game = forced && GAMES[forced] ? forced : pool[Math.floor(Math.random() * pool.length)];
+  W.pitUsed.push(game);
+  W.pitsDone++;
+  W.pit = {
+    id: (Date.now() % 1e9) + W.pitsDone, n: W.pitsDone, of: pitLaps(W.laps).length, game, seed: Math.floor(Math.random() * 1e9),
+    stage: 'intro', stageT: 0, t: 0, dur: gameDuration(game), round: -1, roundT: 0, reveal: null, revealT: 0, pts: {}, live: [], results: null,
+  };
+  mgStates.clear();
+  W.phase = 'pit';
+  onPhaseChange(); pushStatus(true);
+}
+
+// tempo del pit stop visto da questo schermo (sugli schermi collegati stimo il tempo passato)
+function pitView() {
+  const P = W.pit;
+  if (!P) return null;
+  const el = MASTER || W.paused ? 0 : Math.min(0.5, (performance.now() - worldAt) / 1000);
+  return {
+    ...P, stageT: P.stageT + el, t: P.stage === 'play' ? P.t + el : P.t,
+    roundT: P.reveal == null ? P.roundT + el : P.roundT, revealT: (P.revealT || 0) + (P.reveal != null ? el : 0),
+  };
+}
+
+function pitInfo(slot) {
+  if (W.phase !== 'pit' || !W.pit) return null;
+  const P = pitView();
+  const me = P.results ? P.results.find(r => r.slot === slot) || null : null;
+  return {
+    id: P.id, n: P.n, of: P.of, game: P.game, seed: P.seed, stage: P.stage, stageT: r2(P.stageT), t: r2(P.t), dur: P.dur,
+    round: P.round, roundT: r2(P.roundT), reveal: P.reveal, pts: P.pts[slot] || 0, me, places: P.results ? P.results.length : 0,
+  };
+}
+
+// su ogni schermo: computer e tastiera giocano da soli, i premi arrivano a chi è collegato qui
+function pitLocalStep() {
+  const P = W.pit;
+  if (!P) return;
+  const pv = pitView();
+  for (const l of locals.values()) {
+    if (l.slot < 0 || !isBot(l)) continue;
+    let b = botMg.get(l.slot);
+    if (!b || b.id !== P.id) { b = cpuMgNew(l.brain ? cpuLevel : 'normale', P.seed + l.slot * 7919); b.id = P.id; botMg.set(l.slot, b); }
+    if (P.stage !== 'play') continue;
+    l.mg = { ...cpuMgTick(b, P.game, DT, pv), id: P.id };
+  }
+  if (P.results && (P.stage === 'results' || P.stage === 'go')) {
+    for (const r of P.results) {
+      if (!isLocalSlot(r.slot)) continue;
+      const key = P.id + ':' + r.slot;
+      if (appliedPrizes.has(key)) continue;
+      appliedPrizes.add(key);
+      applyPrize(r.slot, r.prize);
+    }
+  }
+}
+
+function pitStep() {
+  const P = W.pit;
+  if (!P) return;
+  P.stageT += DT;
+  for (const l of locals.values()) if (l.slot >= 0 && l.mg && l.mg.id === P.id) mgStates.set(l.slot, l.mg);
+  const g = GAMES[P.game];
+  const st = (slot) => mgStates.get(slot) || {};
+  if (P.stage === 'intro') {
+    if (P.stageT >= PIT_INTRO) { P.stage = 'play'; P.stageT = 0; P.t = 0; if (g.rounds) { P.round = 0; P.roundT = 0; } pushStatus(true); }
+  } else if (P.stage === 'play') {
+    P.t += DT;
+    if (g.rounds) {
+      if (P.reveal == null) {
+        P.roundT += DT;
+        const all = W.players.length && W.players.every(p => { const a = st(p.slot).ans; return a && a[P.round] != null; });
+        if (P.roundT >= g.roundTime || (all && P.roundT > 1)) resolveRound();
+      } else {
+        P.revealT += DT;
+        if (P.revealT >= g.revealTime) {
+          P.reveal = null; P.round++; P.roundT = 0;
+          if (P.round >= g.rounds) { P.round = g.rounds - 1; endPlay(); }
+          pushStatus(true);
+        }
+      }
+    } else {
+      const allDone = W.players.length && W.players.every(p => st(p.slot).done);
+      if (P.t >= P.dur || allDone) endPlay();
+    }
+    let maxPts = 0;
+    for (const p of W.players) {
+      const s = st(p.slot);
+      maxPts = Math.max(maxPts, P.game === 'piumeno' ? s.best || 0 : ['barra', 'patatine'].includes(P.game) ? s.score || 0 : P.pts[p.slot] || 0);
+    }
+    P.live = W.players.map(p => ({
+      slot: p.slot, label: liveLabel(P.game, st(p.slot), P, p.slot), bar: liveBar(P.game, st(p.slot), P, p.slot, maxPts),
+      out: !!st(p.slot).out, done: !!st(p.slot).done,
+    }));
+  } else if (P.stage === 'results') {
+    if (P.stageT >= PIT_RESULTS) { P.stage = 'go'; P.stageT = 0; pushStatus(true); }
+  } else if (P.stage === 'go') {
+    if (P.stageT >= PIT_GO) { W.phase = 'race'; P.stage = 'done'; onPhaseChange(); pushStatus(true); }
+  }
+}
+
+function resolveRound() {
+  const P = W.pit, g = GAMES[P.game];
+  const picks = {};
+  for (const p of W.players) {
+    const a = (mgStates.get(p.slot) || {}).ans;
+    const v = a ? Number(a[P.round]) : NaN;
+    if (Number.isInteger(v) && v >= 0 && v < (P.game === 'porta' ? 3 : 4)) picks[p.slot] = v;
+  }
+  if (P.game === 'porta') {
+    const cnt = [0, 0, 0];
+    for (const v of Object.values(picks)) cnt[v]++;
+    for (const [slot, v] of Object.entries(picks)) if (cnt[v] === 1) P.pts[slot] = (P.pts[slot] || 0) + 1;
+    P.reveal = { picks, lone: cnt.map(c => c === 1) };
+  } else {
+    const q = quizRound(P.seed, P.round);
+    for (const [slot, v] of Object.entries(picks)) {
+      const at = Number(((mgStates.get(Number(slot)) || {}).at || {})[P.round]);
+      const ms = Number.isFinite(at) ? at : g.roundTime * 1000;
+      if (v === q.correct) P.pts[slot] = (P.pts[slot] || 0) + 10 + Math.max(0, Math.round(5 * (1 - ms / (g.roundTime * 1000))));
+      else P.pts[slot] = (P.pts[slot] || 0) - 5;
+    }
+    P.reveal = { picks, correct: q.correct };
+  }
+  P.revealT = 0;
+  pushStatus(true);
+}
+
+function endPlay() {
+  const P = W.pit;
+  const ranking = rankGame(P.game, W.players.map(p => ({ slot: p.slot, s: mgStates.get(p.slot) })), P);
+  P.results = ranking.map(r => ({ ...r, prize: prizeFor(r.place, ranking.length) }));
+  P.stage = 'results'; P.stageT = 0;
+  pushStatus(true);
+}
+
+const RAR_ORDER = { combo: 0, rara: 0, media: 1, comune: 2 };
+function applyPrize(slot, pr) {
+  if (!pr || !pr.draw) return;
+  const cards = Array.from({ length: pr.draw }, () => drawCard(Math.random, pr.rare ? 3 : 1));
+  const l = localBySlot(slot);
+  if (pr.keep < pr.draw && l && !isBot(l)) {
+    handOf(slot).offer = { cards, keep: pr.keep };
+    vibrate(slot, [40, 40, 40]);
+    pushStatus(true);
+    return;
+  }
+  cards.sort((a, b) => RAR_ORDER[CARDS[a].rar] - RAR_ORDER[CARDS[b].rar]).slice(0, pr.keep).forEach(c => addCard(slot, c));
+}
+
+function pickOffer(slot, pick) {
+  const h = hands.get(slot);
+  if (!h || !h.offer) return;
+  const o = h.offer;
+  h.offer = null;
+  const idx = Array.isArray(pick) ? [...new Set(pick.map(Number))].filter(i => Number.isInteger(i) && i >= 0 && i < o.cards.length).slice(0, o.keep) : [];
+  for (let i = 0; idx.length < o.keep && i < o.cards.length; i++) if (!idx.includes(i)) idx.push(i);
+  idx.forEach(i => addCard(slot, o.cards[i]));
+  pushStatus(true);
+}
+function offerInfo(slot) {
+  const h = hands.get(slot);
+  return h && h.offer ? { cards: h.offer.cards, keep: h.offer.keep } : null;
+}
+
+// fine del pit stop: si riparte (turbo al primo, attesa all'ultimo)
+function pitEnded() {
+  for (const [slot, h] of hands) if (h.offer && isLocalSlot(slot)) pickOffer(slot, []);
+  const P = W.pit;
+  if (P && P.results && W.phase === 'race') {
+    for (const r of P.results) {
+      const k = karts.get(r.slot);
+      if (!k || !isLocalSlot(r.slot)) continue;
+      if (r.prize.boost) giveBoost(k, r.prize.boost, 'orange');
+      if (r.prize.wait) k.stopT = Math.max(k.stopT || 0, r.prize.wait);
+    }
+  }
+  for (const l of locals.values()) l.mg = null;
+}
+
 // solo per i test (pc.html?debug=1)
-if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, track };
+if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, track, mgStates, startPit };
 
 drawLobby();
 startNet();

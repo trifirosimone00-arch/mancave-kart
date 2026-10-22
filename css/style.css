@@ -154,3 +154,4 @@ button { font-family: inherit; cursor: pointer; }
 .v-fx.bomb { color: #ff5a4a; }
 .feed { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; z-index: 2; }
 .feed div { background: rgba(14,18,34,0.85); color: #fff; font-weight: 900; font-size: clamp(14px, 2.4vmin, 22px); padding: 6px 14px; border-radius: 999px; border: 2px solid #ffd400; }
+.cpu-box { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }

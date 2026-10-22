@@ -9,6 +9,7 @@ import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, PORT
 import { createRenderer } from './render.js';
 import { createScreenConfig, bindLayoutButtons, bindScreenBar } from './screen-ui.js';
 import { iceServers, PEER_PREFIX, hasTurn } from './net.js';
+import { CPU_LEVELS, CPU_NAMES, newBrain, cpuInput } from './ai.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -229,7 +230,7 @@ function assignSlot(cid, name, color, station) {
   if (W.players.length >= MAX_PLAYERS) return { error: 'full' };
   const used = new Set(W.players.map(q => q.slot));
   let slot = 0; while (used.has(slot)) slot++;
-  W.players.push({ slot, cid, name, color, station, connected: true, kbd: cid.startsWith('kbd') });
+  W.players.push({ slot, cid, name, color, station, connected: true, kbd: cid.startsWith('kbd'), cpu: cid.startsWith('cpu') });
   W.players.sort((a, b) => a.slot - b.slot);
   toast(`${name} è entrato${station === 'self' ? '' : ' (a distanza)'}`);
   updateCaptain(); drawLobby();
@@ -253,7 +254,7 @@ function setConnected(slot, on) {
 }
 
 function updateCaptain() {
-  const real = W.players.filter(p => p.connected && !p.kbd);
+  const real = W.players.filter(p => p.connected && !p.kbd && !p.cpu);
   W.captain = real.length ? real[0].slot : (W.players[0] ? W.players[0].slot : -1);
 }
 
@@ -411,6 +412,7 @@ function startRace() {
   W.phase = 'intro'; W.introT = 0; W.raceTime = 0; W.countdown = COUNTDOWN; W.results = [];
   W.portals = PORTAL_FRACTIONS.map(() => 0); W.hazards = []; W.missiles = []; W.feed = [];
   firstFinishAt = -1; finishT = 0;
+  for (const l of locals.values()) if (l.brain) l.brain = newBrain(cpuLevel);
   buildKarts();
   setPause(false);
   onPhaseChange();
@@ -500,6 +502,22 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
+// piloti del computer: decidono sterzo, derapata e carte
+function cpuThink(countdownLeft) {
+  for (const l of locals.values()) {
+    if (!l.brain || l.slot < 0) continue;
+    const k = karts.get(l.slot);
+    if (!k) continue;
+    l.brain.level = cpuLevel;
+    l.input = cpuInput(track, k, l.brain, DT, {
+      phase: W.phase === 'finish' ? 'race' : W.phase, countdownLeft,
+      hand: hands.get(l.slot),
+      others: [...karts.values()].filter(q => q.slot !== l.slot),
+      useCard: (i, to) => useCard(l.slot, i, to),
+    });
+  }
+}
+
 function simStep() {
   const kb = locals.get('kbd-' + myId);
   if (kb) {
@@ -516,6 +534,7 @@ function simStep() {
     return;
   }
   const clock = raceClock();
+  if (['countdown', 'race', 'finish'].includes(W.phase)) cpuThink(MASTER ? W.countdown : clock.countdown);
 
   if (W.phase === 'intro') {
     if (MASTER) {
@@ -599,7 +618,7 @@ function worldMsg() {
     portals: W.portals, hazards: W.hazards, missiles: W.missiles, feed: W.feed,
     t: 'w', q: W.q, raceId: W.raceId, phase: W.phase, laps: W.laps, raceTime: W.raceTime, countdown: W.countdown,
     introT: W.introT, paused: W.paused, pauseMsg: W.pauseMsg, captain: W.captain, grid: W.grid, results: W.results,
-    players: W.players.map(p => ({ slot: p.slot, cid: p.cid, name: p.name, color: p.color, station: p.station, connected: p.connected, kbd: p.kbd })),
+    players: W.players.map(p => ({ slot: p.slot, cid: p.cid, name: p.name, color: p.color, station: p.station, connected: p.connected, kbd: p.kbd, cpu: p.cpu })),
     // per i kart degli altri schermi inoltro l'ultima posizione completa ricevuta
     karts: [...karts.values()].map(k => {
       if (isLocalSlot(k.slot)) return compact(k);
@@ -646,7 +665,7 @@ function renderSnap() {
 }
 
 function playerList() {
-  return W.players.map(p => ({ slot: p.slot, name: p.name, color: p.color, here: isLocalSlot(p.slot) }));
+  return W.players.map(p => ({ slot: p.slot, name: p.name, color: p.color, here: isLocalSlot(p.slot) && !p.cpu }));
 }
 
 // ------------------------------------------------------------------ carte
@@ -923,8 +942,9 @@ function onPhaseChange() {
 }
 
 let lobbySig = '';
+let cpuLevel = CPU_LEVELS[store.get('cpu-level', 'normale')] ? store.get('cpu-level', 'normale') : 'normale';
 function drawLobby() {
-  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()]]);
+  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel]);
   if (sig === lobbySig) return;
   lobbySig = sig;
   const el = $('players');
@@ -941,7 +961,7 @@ function drawLobby() {
       d.querySelector('.nm').textContent = p.name;
       if (W.captain === p.slot) d.querySelector('.nm').insertAdjacentHTML('beforeend', '<span class="cap">CAPO</span>');
       const stEl = d.querySelector('.st');
-      stEl.textContent = !p.connected ? 'Disconnesso' : p.kbd ? 'Tastiera: frecce + spazio' : here ? 'Pronto' : 'Pronto · a distanza';
+      stEl.textContent = !p.connected ? 'Disconnesso' : p.cpu ? `Computer · ${CPU_LEVELS[cpuLevel].label}` : p.kbd ? 'Tastiera: frecce + spazio' : here ? 'Pronto' : 'Pronto · a distanza';
       if (!p.connected) stEl.classList.add('off');
       if (MASTER) {
         const rm = document.createElement('button');
@@ -973,6 +993,17 @@ function drawLobby() {
   $('start').disabled = W.players.length === 0;
   $('wait-start').classList.toggle('hidden', MASTER);
   $('kbd').textContent = locals.has('kbd-' + myId) ? 'Togli la tastiera' : 'Prova con la tastiera';
+  $('cpu-box').classList.toggle('hidden', !MASTER);
+  $('cpu-add').disabled = W.players.length >= MAX_PLAYERS;
+  $('cpu-add').textContent = W.players.length >= MAX_PLAYERS ? 'Stanza piena' : '+ Aggiungi computer';
+  const lv = $('cpu-level');
+  lv.innerHTML = '';
+  for (const [id, L] of Object.entries(CPU_LEVELS)) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = L.label; b.className = cpuLevel === id ? 'on' : '';
+    b.onclick = () => { cpuLevel = id; store.set('cpu-level', id); lobbySig = ''; drawLobby(); };
+    lv.appendChild(b);
+  }
   $('stations-count').textContent = MASTER ? (stations.size ? `${stations.size} schermo${stations.size === 1 ? '' : 'i'} a distanza collegat${stations.size === 1 ? 'o' : 'i'}` : 'Nessuno schermo a distanza collegato') : '';
 }
 
@@ -1027,6 +1058,19 @@ $('kbd').onclick = () => {
     locals.set(cid, nl);
     requestJoin(nl);
   }
+  lobbySig = ''; drawLobby();
+};
+$('cpu-add').onclick = () => {
+  if (!MASTER || W.players.length >= MAX_PLAYERS) return;
+  if (W.phase !== 'lobby' && W.phase !== 'podium') return;
+  const taken = new Set(W.players.map(p => p.name));
+  const pick = CPU_NAMES.find(c => !taken.has(c.name)) || CPU_NAMES[0];
+  let n = 0; while (locals.has('cpu-' + n)) n++;
+  const cid = 'cpu-' + n;
+  const nl = { cid, name: pick.name, color: pick.color, conn: null, connected: true, slot: -1, cpu: true,
+    input: { steer: 0, drift: false, brake: false, trick: false }, seq: -1, brain: newBrain(cpuLevel) };
+  locals.set(cid, nl);
+  requestJoin(nl);
   lobbySig = ''; drawLobby();
 };
 if ($('room-save')) {

@@ -77,6 +77,7 @@ export function stepKart(track, k, input, dt, phase) {
   // ---- velocità ----
   let max = MAX_SPEED;
   if (k.grass && !k.air) max *= GRASS_FACTOR;
+  if (k.speedMul) max *= k.speedMul;
   if (k.miniT > 0) max *= 0.7;
   if (k.slowT > 0) max *= 0.6;
   if (k.boostT > 0) { max *= BOOST_FACTOR; k.boostT -= dt; }

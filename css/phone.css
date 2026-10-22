@@ -59,3 +59,22 @@ input[type="range"] { width: 100%; height: 36px; }
 
 .end-place { font-size: 120px; color: var(--yellow); margin-top: 30px; text-shadow: 0 6px 0 var(--red); }
 .end-actions { display: flex; flex-direction: column; gap: 12px; width: min(420px, 100%); }
+
+/* carte */
+.pad-center { justify-content: center; gap: 6px; }
+.hand { display: flex; gap: 10px; justify-content: center; min-height: 118px; align-items: flex-end; touch-action: none; }
+.card { width: 86px; height: 112px; border-radius: 14px; border: 3px solid #fff; color: #fff; display: flex; flex-direction: column; justify-content: space-between; padding: 7px; box-sizing: border-box; font-weight: 900; font-size: 13px; line-height: 1.1; text-align: left; touch-action: none; user-select: none; box-shadow: 0 5px 0 rgba(0,0,0,0.35); transition: transform 0.12s; position: relative; }
+.card .rar { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; opacity: 0.85; }
+.card .nm { font-family: 'Bungee', sans-serif; font-weight: 400; font-size: 13px; }
+.card.rara { border-color: #ffd400; box-shadow: 0 0 0 3px rgba(255,212,0,0.35), 0 5px 0 rgba(0,0,0,0.35); }
+.card.combo { border-color: #ff8a00; box-shadow: 0 0 0 3px rgba(255,138,0,0.45), 0 5px 0 rgba(0,0,0,0.35); }
+.card.empty { background: transparent !important; border: 3px dashed #3a4166; box-shadow: none; }
+.card.drag { z-index: 5; transition: none; }
+.card.target { outline: 4px solid #2ec46b; }
+.hand.cool .card:not(.empty) { filter: grayscale(0.8) brightness(0.6); }
+.hand.pending .card:not(.empty) { outline: 3px dashed #ff5a4a; }
+.hand-hint { font-size: 12px; font-weight: 800; color: var(--muted); text-align: center; min-height: 15px; }
+.hand-hint.warn { color: #ffd400; }
+.pick-list { display: grid; gap: 10px; }
+.pick-list button { min-height: 56px; border-radius: 14px; border: 3px solid var(--ink-3); background: var(--ink); color: #fff; font-weight: 900; font-size: 20px; display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+.pick-list i { width: 18px; height: 18px; border-radius: 50%; display: inline-block; }

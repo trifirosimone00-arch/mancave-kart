@@ -1,5 +1,6 @@
 // Telefono = volante. Manda sterzo e tasti allo schermo, riceve posizione, giri e vibrazioni.
 import { iceServers, PEER_PREFIX } from './net.js';
+import { CARDS, comboOf, HAND_SIZE } from './cards.js';
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#e8322b', '#ff8a00', '#ffcc00', '#2ec46b', '#1fb5c9', '#2f7bff', '#9b5cff', '#ff4fa3'];
 
@@ -237,6 +238,7 @@ function onStatus(s) {
   else if (s.finished) msg = 'Traguardo!';
   else if (s.air) msg = 'Scuoti il telefono!';
   $('p-msg').textContent = msg;
+  drawHand(s);
   $('paused').classList.toggle('hidden', !(s.paused && racing));
   $('paused-msg').textContent = s.pauseMsg || '';
   // fine
@@ -307,3 +309,111 @@ function goFull() {
 }
 
 show('join');
+
+
+// ------------------------------------------------------------------ carte
+// Scorri una carta verso l'alto per usarla; trascinala su un'altra per una combo.
+let handSig = '';
+function drawHand(s) {
+  const h = s.hand || { cards: [], cd: 0, pending: null };
+  const el = $('hand');
+  const sig = JSON.stringify(h.cards) + '|' + (h.pending || '');
+  el.classList.toggle('cool', h.cd > 0);
+  el.classList.toggle('pending', !!h.pending);
+  const hint = $('hand-hint');
+  hint.classList.toggle('warn', !!h.pending || h.cd > 0);
+  if (h.pending) hint.textContent = `Hai pescato ${CARDS[h.pending].name}: tocca la carta da buttare`;
+  else if (h.cd > 0) hint.textContent = `Ricarica: ${Math.ceil(h.cd)} s`;
+  else if (h.cards.length) hint.textContent = 'Scorri in su per usarla · trascinala su un\'altra per una combo';
+  else hint.textContent = 'Passa sotto gli archi gialli per pescare carte';
+  if (sig === handSig) return;
+  handSig = sig;
+  el.innerHTML = '';
+  for (let i = 0; i < HAND_SIZE; i++) {
+    const id = h.cards[i];
+    const c = document.createElement('div');
+    if (!id) { c.className = 'card empty'; el.appendChild(c); continue; }
+    const def = CARDS[id];
+    c.className = 'card ' + (def.rar === 'rara' ? 'rara' : def.rar === 'combo' ? 'combo' : '');
+    c.style.background = def.color;
+    c.dataset.i = String(i);
+    c.innerHTML = '<span class="rar"></span><span class="nm"></span>';
+    c.querySelector('.rar').textContent = def.rar;
+    c.querySelector('.nm').textContent = def.name;
+    c.setAttribute('aria-label', `${def.name}: ${def.desc}`);
+    bindCard(c, i);
+    el.appendChild(c);
+  }
+}
+
+function bindCard(c, i) {
+  let sx = 0, sy = 0, dragging = false;
+  c.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    c.setPointerCapture?.(e.pointerId);
+    sx = e.clientX; sy = e.clientY; dragging = true;
+    c.classList.add('drag');
+  });
+  c.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    c.style.transform = `translate(${dx}px, ${dy}px)`;
+    document.querySelectorAll('.card.target').forEach(t => t.classList.remove('target'));
+    const over = cardAt(e.clientX, e.clientY, c);
+    if (over && comboOf(cardId(i), cardId(Number(over.dataset.i)))) over.classList.add('target');
+  });
+  const end = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    c.classList.remove('drag');
+    c.style.transform = '';
+    document.querySelectorAll('.card.target').forEach(t => t.classList.remove('target'));
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    const h = (st.status && st.status.hand) || {};
+    if (h.pending) { if (Math.hypot(dx, dy) < 20) send2({ t: 'discard', i }); return; }
+    const over = cardAt(e.clientX, e.clientY, c);
+    if (over && Math.hypot(dx, dy) > 30) {
+      const j = Number(over.dataset.i);
+      if (comboOf(cardId(i), cardId(j))) send2({ t: 'combo', a: i, b: j });
+      return;
+    }
+    if (dy < -40 && Math.abs(dy) > Math.abs(dx)) play(i);
+  };
+  c.addEventListener('pointerup', end);
+  c.addEventListener('pointercancel', end);
+}
+
+function cardId(i) { const h = (st.status && st.status.hand) || { cards: [] }; return h.cards[i]; }
+function cardAt(x, y, self) {
+  self.style.pointerEvents = 'none';
+  const el = document.elementFromPoint(x, y);
+  self.style.pointerEvents = '';
+  const c = el && el.closest ? el.closest('.card') : null;
+  return c && c !== self && !c.classList.contains('empty') ? c : null;
+}
+function send2(msg) { if (conn && conn.open) { try { conn.send(msg); } catch (e) { /* niente */ } } }
+
+function play(i) {
+  const id = cardId(i);
+  if (!id) return;
+  const h = st.status.hand;
+  if (h.cd > 0) { if (navigator.vibrate) navigator.vibrate([10, 40, 10]); return; }
+  if (CARDS[id].target !== 'pick') { send2({ t: 'use', i }); return; }
+  // scegli l'avversario
+  const others = st.status.others || [];
+  if (!others.length) return;
+  $('pick-title').textContent = `${CARDS[id].name}: contro chi?`;
+  const list = $('pick-list');
+  list.innerHTML = '';
+  for (const o of others) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.innerHTML = '<i></i><span></span>';
+    b.querySelector('i').style.background = o.color;
+    b.querySelector('span').textContent = o.name;
+    b.onclick = () => { send2({ t: 'use', i, to: o.slot }); $('pick').classList.add('hidden'); };
+    list.appendChild(b);
+  }
+  $('pick').classList.remove('hidden');
+}
+$('pick-cancel').onclick = () => $('pick').classList.add('hidden');

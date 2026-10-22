@@ -22,11 +22,14 @@ export function createKart(track, slot, gridIndex, player) {
     boostT: 0, boostKind: '', lapCount: 0, finished: false, finishTime: 0,
     place: gridIndex + 1, wrongWayT: 0, spinT: 0, startPress: -1,
     prevDrift: false, events: [], bumpCD: 0, grass: false,
+    // effetti delle carte (secondi rimasti)
+    shieldT: 0, mirror: 0, ghostT: 0, invertT: 0, stopT: 0, miniT: 0, slowT: 0, fogT: 0, bombT: 0,
+    contacts: [],
   });
   return k;
 }
 
-function placeAt(track, k, s, lat) {
+export function placeAt(track, k, s, lat) {
   const i = Math.floor(((s % track.length) + track.length) % track.length / track.ds) % track.count;
   const p = track.pts[i];
   k.x = p.x + p.rx * lat; k.z = p.z + p.rz * lat; k.y = 0;
@@ -38,8 +41,10 @@ function placeAt(track, k, s, lat) {
 // input: { steer: -1..1 (positivo = destra), drift: bool, brake: bool, trick: bool }
 export function stepKart(track, k, input, dt, phase) {
   k.events.length = 0;
+  k.contacts.length = 0;
   if (k.bumpCD > 0) k.bumpCD -= dt;
-  const steer = Math.max(-1, Math.min(1, input.steer || 0));
+  let steer = Math.max(-1, Math.min(1, input.steer || 0));
+  if (k.invertT > 0) steer = -steer;
 
   if (phase === 'countdown') {
     // turbo alla partenza: premi DERAPA nell'ultimo mezzo secondo
@@ -48,6 +53,7 @@ export function stepKart(track, k, input, dt, phase) {
     return;
   }
   if (k.finished) { input = { steer: 0, drift: false, brake: false }; }
+  tickEffects(k, dt);
 
   const forwardX = Math.sin(k.yaw), forwardZ = Math.cos(k.yaw);
 
@@ -60,9 +66,19 @@ export function stepKart(track, k, input, dt, phase) {
     return;
   }
 
+  // freno a mano (carta): fermo per qualche istante
+  if (k.stopT > 0) {
+    k.speed *= Math.pow(0.02, dt);
+    k.drifting = false; k.driftDir = 0; k.driftCharge = 0;
+    move(track, k, dt, forwardX, forwardZ);
+    return;
+  }
+
   // ---- velocità ----
   let max = MAX_SPEED;
   if (k.grass && !k.air) max *= GRASS_FACTOR;
+  if (k.miniT > 0) max *= 0.7;
+  if (k.slowT > 0) max *= 0.6;
   if (k.boostT > 0) { max *= BOOST_FACTOR; k.boostT -= dt; }
   if (input.brake && !k.air) {
     if (k.speed > 0.5) k.speed -= 38 * dt;
@@ -116,7 +132,16 @@ export function stepKart(track, k, input, dt, phase) {
   move(track, k, dt, Math.sin(k.yaw), Math.cos(k.yaw));
 }
 
-function giveBoost(k, t, kind) {
+// timer degli effetti; la bomba esplode a chi ce l'ha quando arriva a zero
+function tickEffects(k, dt) {
+  for (const f of ['shieldT', 'ghostT', 'invertT', 'stopT', 'miniT', 'slowT', 'fogT']) if (k[f] > 0) k[f] = Math.max(0, k[f] - dt);
+  if (k.bombT > 0) {
+    k.bombT -= dt;
+    if (k.bombT <= 0) { k.bombT = 0; k.spinT = 2; k.speed *= 0.3; k.events.push('boom'); }
+  }
+}
+
+export function giveBoost(k, t, kind) {
   k.boostT = Math.max(k.boostT, t);
   k.boostKind = kind;
   k.events.push('boost');
@@ -194,7 +219,7 @@ export function collideKarts(karts) {
   for (let i = 0; i < karts.length; i++) {
     for (let j = i + 1; j < karts.length; j++) {
       const a = karts[i], b = karts[j];
-      if (Math.abs(a.y - b.y) > 1.5) continue;
+      if (Math.abs(a.y - b.y) > 1.5 || a.ghostT > 0 || b.ghostT > 0) continue;
       const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
       const min = KART_RADIUS * 2;
       if (d > 0.001 && d < min) {
@@ -202,6 +227,7 @@ export function collideKarts(karts) {
         a.x -= nx * push; a.z -= nz * push; b.x += nx * push; b.z += nz * push;
         if (a.bumpCD <= 0) { a.events.push('hit'); a.bumpCD = 0.4; }
         if (b.bumpCD <= 0) { b.events.push('hit'); b.bumpCD = 0.4; }
+        a.contacts.push(b.slot); b.contacts.push(a.slot);
         const avg = (a.speed + b.speed) / 2;
         a.speed = a.speed * 0.85 + avg * 0.15; b.speed = b.speed * 0.85 + avg * 0.15;
       }
@@ -218,13 +244,14 @@ export function raceDistance(track, k) {
 export function collideWithRemote(local, remotes) {
   for (const a of local) {
     for (const b of remotes) {
-      if (Math.abs(a.y - b.y) > 1.5) continue;
+      if (Math.abs(a.y - b.y) > 1.5 || a.ghostT > 0 || (b.ghostT || 0) > 0) continue;
       const dx = a.x - b.x, dz = a.z - b.z, d = Math.hypot(dx, dz);
       const min = KART_RADIUS * 2;
       if (d > 0.001 && d < min) {
         const push = min - d;
         a.x += (dx / d) * push; a.z += (dz / d) * push;
         if (a.bumpCD <= 0) { a.events.push('hit'); a.bumpCD = 0.4; a.speed *= 0.9; }
+        a.contacts.push(b.slot);
       }
     }
   }

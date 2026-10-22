@@ -4,7 +4,8 @@
 // Ogni schermo calcola i kart dei telefoni collegati a lui (niente ritardo nella guida)
 // e scambia via internet solo le posizioni degli altri.
 import { buildTrack } from './track.js';
-import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance } from './sim.js';
+import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance, placeAt } from './sim.js';
+import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, PORTAL_COOLDOWN, PORTAL_FRACTIONS } from './cards.js';
 import { createRenderer } from './render.js';
 import { createScreenConfig, bindLayoutButtons, bindScreenBar } from './screen-ui.js';
 import { iceServers, PEER_PREFIX, hasTurn } from './net.js';
@@ -43,6 +44,7 @@ const myId = PEER_PREFIX + room + (suffix ? '-' + suffix : '');
 const W = {                       // stato della stanza (sul PC principale è la verità)
   q: 0, raceId: 0, phase: 'lobby', laps: 3, raceTime: 0, countdown: 0, introT: 0,
   paused: false, pauseMsg: '', players: [], grid: [], karts: [], results: [], captain: -1,
+  portals: PORTAL_FRACTIONS.map(() => 0), hazards: [], missiles: [], feed: [],
 };
 let pauseAuto = false, resumeT = 0, firstFinishAt = -1, finishT = 0;
 let worldAt = 0;                  // (schermo collegato) quando è arrivato l'ultimo stato
@@ -167,6 +169,9 @@ function onPhoneMsg(conn, msg) {
     case 'pause': case 'start': case 'laps': case 'again': case 'lobby':
       command(l.slot, msg);
       break;
+    case 'use': useCard(l.slot, Number(msg.i), msg.to == null ? null : Number(msg.to)); break;
+    case 'combo': comboCards(l.slot, Number(msg.a), Number(msg.b)); break;
+    case 'discard': discardFor(l.slot, Number(msg.i)); break;
     case 'leave':
       command(l.slot, { t: 'leave' });
       locals.delete(l.cid);
@@ -211,6 +216,7 @@ function pushStatus(force) {
       place: MASTER ? (k ? k.place : 0) : (wk ? wk.place : 0), lap: k ? Math.max(1, Math.min(W.laps, k.lapCount)) : 0,
       finished: k ? k.finished : false, air: k ? k.air : false,
       results: W.phase === 'podium' ? W.results : undefined,
+      hand: handInfo(l.slot), others: W.players.filter(p => p.slot !== l.slot).map(p => ({ slot: p.slot, name: p.name, color: p.color })),
     });
   }
 }
@@ -285,6 +291,7 @@ function onStationMsg(conn, msg) {
     }
     case 'cmd': { const p = regBySlot(msg.slot); if (p && p.station === sid) handleCommand(msg.slot, msg.msg || {}); break; }
     case 'pconn': { const p = regBySlot(msg.slot); if (p && p.station === sid) setConnected(msg.slot, !!msg.on); break; }
+    case 'c': onMasterCmd(msg.msg || {}, sid); break;
     case 'k':
       if (msg.raceId !== W.raceId) break;
       for (const s of msg.karts || []) {
@@ -331,6 +338,7 @@ function onMasterMsg(msg) {
       if (msg.q <= W.q && W.q - msg.q < 100000) return; // vecchio, arrivato in ritardo
       applyWorld(msg);
       break;
+    case 's': onStationCmd(msg.msg || {}); break;
     case 'joined': {
       const l = locals.get(String(msg.cid));
       if (!l) return;
@@ -401,6 +409,7 @@ function startRace() {
   W.grid = order.map((p, i) => ({ slot: p.slot, gi: i }));
   W.raceId = Date.now() % 1e9;
   W.phase = 'intro'; W.introT = 0; W.raceTime = 0; W.countdown = COUNTDOWN; W.results = [];
+  W.portals = PORTAL_FRACTIONS.map(() => 0); W.hazards = []; W.missiles = []; W.feed = [];
   firstFinishAt = -1; finishT = 0;
   buildKarts();
   setPause(false);
@@ -415,6 +424,7 @@ function buildKarts() {
     karts.set(g.slot, createKart(track, g.slot, g.gi, p));
   }
   currentRace = W.raceId; raceStartedLocal = false;
+  hands.clear(); hitHazards.clear();
 }
 
 function toLobby() {
@@ -477,6 +487,14 @@ window.addEventListener('keydown', (e) => {
   if ((e.code === 'KeyP' || e.code === 'Escape') && ['intro', 'countdown', 'race', 'finish'].includes(W.phase)) {
     if (MASTER) setPause(!W.paused, 'Pausa dal PC', false); else if (kb) command(kb.slot, { t: 'pause' });
   }
+  if (kb && kb.slot >= 0 && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) {
+    const i = Number(e.code.slice(5)) - 1;
+    const h = hands.get(kb.slot);
+    const id = h && h.cards[i];
+    let to = null;
+    if (id && CARDS[id].target === 'pick') { const o = W.players.find(p => p.slot !== kb.slot); to = o ? o.slot : null; }
+    useCard(kb.slot, i, to);
+  }
   if (e.code === 'Space' && W.phase === 'intro') { if (MASTER) W.introT = INTRO_TIME; else if (kb) command(kb.slot, { t: 'skip' }); }
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(e.code) && W.phase !== 'lobby') e.preventDefault();
 });
@@ -537,8 +555,10 @@ function simStep() {
       }
     }
     collideKarts(mine);
-    const ghosts = others.map(k => remoteRender(k.slot)).filter(Boolean);
+    const ghosts = others.map(k => ({ ...(remoteRender(k.slot) || k), slot: k.slot })).filter(Boolean);
     collideWithRemote(mine, ghosts);
+    if (W.phase === 'race') cardsStep(mine, now);
+    if (MASTER && W.phase === 'race') masterCardsStep();
     for (const k of mine) {
       for (const e of k.events) {
         if (e === 'boost') vibrate(k.slot, [35]);
@@ -547,6 +567,7 @@ function simStep() {
         else if (e === 'land') vibrate(k.slot, [25]);
         else if (e === 'trick') vibrate(k.slot, [20, 30, 20]);
         else if (e === 'spin') vibrate(k.slot, [250]);
+        else if (e === 'boom') { vibrate(k.slot, [400]); toMaster({ t: 'feed', text: `BOOM! La bomba è esplosa a ${nameOf(k.slot)}` }); }
       }
       k.events.length = 0;
     }
@@ -569,11 +590,13 @@ function compact(k) {
     speed: r2(k.speed), vy: r2(k.vy), air: k.air, hop: r2(k.hop), drifting: k.drifting, driftDir: k.driftDir, driftT: r2(k.driftT),
     driftCharge: r2(k.driftCharge), boostT: r2(k.boostT), boostKind: k.boostKind, trickT: r2(k.trickT), spinT: r2(k.spinT),
     place: k.place, lapCount: k.lapCount, finished: k.finished, finishTime: r2(k.finishTime || 0), wrongWay: r2(k.wrongWayT),
+    shieldT: r2(k.shieldT), mirror: k.mirror, ghostT: r2(k.ghostT), miniT: r2(k.miniT), bombT: r2(k.bombT), fogT: r2(k.fogT), invertT: r2(k.invertT), stopT: r2(k.stopT),
   };
 }
 function worldMsg() {
   W.q++;
   return {
+    portals: W.portals, hazards: W.hazards, missiles: W.missiles, feed: W.feed,
     t: 'w', q: W.q, raceId: W.raceId, phase: W.phase, laps: W.laps, raceTime: W.raceTime, countdown: W.countdown,
     introT: W.introT, paused: W.paused, pauseMsg: W.pauseMsg, captain: W.captain, grid: W.grid, results: W.results,
     players: W.players.map(p => ({ slot: p.slot, cid: p.cid, name: p.name, color: p.color, station: p.station, connected: p.connected, kbd: p.kbd })),
@@ -617,11 +640,278 @@ function renderSnap() {
   return {
     phase: W.phase, laps: W.laps, raceTime: clock.raceTime, countdown: clock.countdown,
     introT: Math.min(1, clock.introT / INTRO_TIME), paused: W.paused, karts: list,
+    portals: W.portals.map(u => !(u > clock.raceTime)), hazards: W.hazards.filter(h => h.kind !== 'trap'), missiles: W.missiles,
+    feed: W.feed.map(f => f.text),
   };
 }
 
 function playerList() {
   return W.players.map(p => ({ slot: p.slot, name: p.name, color: p.color, here: isLocalSlot(p.slot) }));
+}
+
+// ------------------------------------------------------------------ carte
+const hands = new Map();          // slot -> { cards: [], cd, pending, pendingT } (solo piloti di questo schermo)
+const hitHazards = new Set();     // macchie d'olio già prese da un mio kart (in attesa che il PC le tolga)
+let fxId = 0;
+
+const nameOf = (slot) => (regBySlot(slot) || {}).name || 'Qualcuno';
+const stationOf = (slot) => (regBySlot(slot) || {}).station;
+
+// verso il PC principale (o direttamente, se sono io)
+function toMaster(msg) {
+  if (MASTER) onMasterCmd(msg, 'self');
+  else send(masterConn, { t: 'c', msg });
+}
+// dal PC principale verso lo schermo che gestisce un certo pilota
+function toStation(sid, msg) {
+  if (sid === 'self') onStationCmd(msg);
+  else { const st = stations.get(sid); if (st) send(st.conn, { t: 's', msg }); }
+}
+
+function handOf(slot) {
+  let h = hands.get(slot);
+  if (!h) { h = { cards: [], cd: 0, pending: null, pendingT: 0 }; hands.set(slot, h); }
+  return h;
+}
+function handInfo(slot) {
+  const h = hands.get(slot);
+  if (!h) return { cards: [], cd: 0, pending: null };
+  return { cards: h.cards, cd: Math.max(0, Math.round(h.cd * 10) / 10), pending: h.pending };
+}
+
+function addCard(slot, id) {
+  if (!isLocalSlot(slot) || !CARDS[id]) return;
+  const h = handOf(slot);
+  if (h.cards.length < HAND_SIZE) h.cards.push(id);
+  else { h.pending = id; h.pendingT = 4; }  // mano piena: il telefono chiede cosa scartare
+  vibrate(slot, [30, 40, 30]);
+  pushStatus(true);
+}
+
+function discardFor(slot, i) {
+  const h = hands.get(slot);
+  if (!h || !h.pending || !(i >= 0 && i < h.cards.length)) return;
+  h.cards[i] = h.pending; h.pending = null;
+  pushStatus(true);
+}
+
+function comboCards(slot, a, b) {
+  const h = hands.get(slot);
+  if (!h || a === b || !h.cards[a] || !h.cards[b]) return;
+  const c = comboOf(h.cards[a], h.cards[b]);
+  if (!c) return;
+  h.cards = h.cards.filter((_, i) => i !== a && i !== b);
+  h.cards.push(c);
+  vibrate(slot, [20, 20, 60]);
+  pushStatus(true);
+}
+
+function useCard(slot, i, to) {
+  if (W.phase !== 'race' || W.paused) return;
+  const h = hands.get(slot), k = karts.get(slot);
+  if (!h || !k || k.finished || h.cd > 0) return;
+  const id = h.cards[i];
+  if (!id) return;
+  const def = CARDS[id];
+  if (def.target === 'pick' && (to == null || to === slot || !regBySlot(to))) return;
+  h.cards.splice(i, 1);
+  h.cd = COOLDOWN;
+  vibrate(slot, [20]);
+  applySelf(k, id);
+  const msg = { t: 'play', from: slot, card: id, to };
+  if (id === 'oil' || id === 'trap') {
+    const fx = Math.sin(k.yaw), fz = Math.cos(k.yaw);
+    msg.pos = { x: k.x - fx * 4, z: k.z - fz * 4 };
+  }
+  toMaster(msg);
+  pushStatus(true);
+}
+
+function teleport(k, pos) {
+  placeAt(track, k, pos.s, pos.lat);
+  k.lapCount = pos.lapCount; k.prevS = k.s;
+}
+
+function pushFeed(text) {
+  W.feed.push({ id: ++fxId, text, until: W.raceTime + 3.5 });
+  if (W.feed.length > 3) W.feed.shift();
+}
+
+// ---- PC principale: decide portali, bersagli, missili, olio
+function targetAhead(from) {
+  const k = karts.get(from);
+  if (!k) return null;
+  const t = [...karts.values()].find(q => q.place === k.place - 1);
+  return t ? t.slot : null;
+}
+function targetFirst(from) {
+  const t = [...karts.values()].find(q => q.place === 1);
+  return t && t.slot !== from ? t.slot : null;
+}
+function sendFx(to, from, kind, data = {}) {
+  const sid = stationOf(to);
+  if (sid) toStation(sid, { t: 'fx', to, from, kind, data });
+}
+
+function onMasterCmd(msg, sid) {
+  if (!MASTER) return;
+  // uno schermo può parlare solo per i suoi piloti
+  const owns = (slot) => stationOf(slot) === sid;
+  switch (msg.t) {
+    case 'portal': {
+      if (!owns(msg.slot) || W.phase !== 'race') return;
+      const i = msg.pi;
+      if (!(i >= 0 && i < W.portals.length) || W.portals[i] > W.raceTime) return;
+      W.portals[i] = W.raceTime + PORTAL_COOLDOWN;
+      toStation(sid, { t: 'card', slot: msg.slot, card: drawCard() });
+      break;
+    }
+    case 'play': {
+      if (!owns(msg.from) || !CARDS[msg.card]) return;
+      const def = CARDS[msg.card], from = msg.from;
+      let to = msg.to;
+      if (def.target === 'ahead') to = targetAhead(from);
+      if (def.target === 'first') to = targetFirst(from);
+      pushFeed(`${nameOf(from)}: ${def.name.toUpperCase()}${to != null && def.target !== 'none' ? ' → ' + nameOf(to) : ''}`);
+      switch (msg.card) {
+        case 'missile': case 'missile1': {
+          const k = karts.get(from);
+          if (!k) return;
+          W.missiles.push({ id: ++fxId, from, to, kind: msg.card, s: k.s + 3, lat: k.lat, life: to == null ? 2.5 : 12, x: k.x, z: k.z, yaw: k.yaw });
+          break;
+        }
+        case 'oil': case 'trap':
+          if (msg.pos) W.hazards.push({ id: ++fxId, kind: msg.card, x: msg.pos.x, z: msg.pos.z, owner: from, born: W.raceTime });
+          break;
+        case 'magnet': if (to != null) sendFx(to, from, 'slow'); break;
+        case 'invert': case 'fog': case 'handbrake': case 'mini': case 'thief':
+          if (to != null) sendFx(to, from, msg.card);
+          break;
+        case 'swap': {
+          if (to == null) break;
+          const a = karts.get(from);
+          if (a) sendFx(to, from, 'swap', { s: a.s, lat: a.lat, lapCount: a.lapCount });
+          break;
+        }
+      }
+      break;
+    }
+    case 'result': {
+      // un dispetto è stato bloccato o rimandato indietro
+      if (!owns(msg.to)) return;
+      if (msg.res === 'blocked') pushFeed(`${nameOf(msg.to)} si è protetto!`);
+      if (msg.res === 'mirror') {
+        pushFeed(`Specchio! ${nameOf(msg.to)} rimanda a ${nameOf(msg.from)}`);
+        sendFx(msg.from, msg.to, msg.kind, msg.data || {});
+      }
+      break;
+    }
+    case 'swapback': if (owns(msg.from)) sendFx(msg.to, msg.from, 'swapto', msg.pos); break;
+    case 'give': if (owns(msg.from)) { const st = stationOf(msg.to); if (st) toStation(st, { t: 'card', slot: msg.to, card: msg.card }); } break;
+    case 'bomb': if (owns(msg.from)) sendFx(msg.to, msg.from, 'bomb', { left: msg.left }); break;
+    case 'hazard-hit': W.hazards = W.hazards.filter(h => h.id !== msg.id); break;
+    case 'feed': pushFeed(String(msg.text || '').slice(0, 80)); break;
+  }
+}
+
+function masterCardsStep() {
+  const L = track.length;
+  for (const m of W.missiles) {
+    m.life -= DT;
+    m.s = (m.s + 52 * DT) % L;
+    const t = m.to != null ? karts.get(m.to) : null;
+    if (t) {
+      m.lat += (t.lat - m.lat) * Math.min(1, DT * 3);
+      const d = (t.s - m.s + L) % L;
+      if (d < 2.5 || d > L - 4) { sendFx(m.to, m.from, m.kind); m.life = 0; }
+    }
+    const p = track.pts[Math.floor(m.s / track.ds) % track.count];
+    m.x = p.x + p.rx * m.lat; m.z = p.z + p.rz * m.lat; m.yaw = Math.atan2(p.tx, p.tz);
+  }
+  W.missiles = W.missiles.filter(m => m.life > 0);
+  W.hazards = W.hazards.filter(h => W.raceTime - h.born < 25);
+  W.feed = W.feed.filter(f => f.until > W.raceTime);
+}
+
+// ---- ogni schermo: effetti sui propri kart
+function onStationCmd(msg) {
+  switch (msg.t) {
+    case 'card': addCard(msg.slot, msg.card); break;
+    case 'fx': {
+      const k = karts.get(msg.to);
+      if (!k || !isLocalSlot(msg.to)) return;
+      if (msg.kind === 'swapto') { teleport(k, msg.data); vibrate(msg.to, [80, 40, 80]); return; }
+      if (msg.kind === 'bomb') {
+        const r = receive(k, 'bomb');
+        if (r === 'ok') { k.bombT = Math.max(1, msg.data.left || 5); k.bombHold = 1; vibrate(msg.to, [60, 30, 60]); }
+        else toMaster({ t: 'result', to: msg.to, from: msg.from, kind: 'bomb', res: r, data: msg.data });
+        return;
+      }
+      if (msg.kind === 'swap') {
+        const r = receive(k, 'swap');
+        if (r !== 'ok') { toMaster({ t: 'result', to: msg.to, from: msg.from, kind: 'swap', res: r === 'mirror' ? 'blocked' : r }); return; }
+        const mine = { s: k.s, lat: k.lat, lapCount: k.lapCount };
+        teleport(k, msg.data);
+        vibrate(msg.to, [80, 40, 80]);
+        toMaster({ t: 'swapback', from: msg.to, to: msg.from, pos: mine });
+        return;
+      }
+      const r = receive(k, msg.kind);
+      if (r !== 'ok') { toMaster({ t: 'result', to: msg.to, from: msg.from, kind: msg.kind, res: r, data: msg.data }); return; }
+      vibrate(msg.to, [150]);
+      if (msg.kind === 'thief' || msg.kind === 'missile1') {
+        const h = hands.get(msg.to);
+        if (h && h.cards.length) {
+          const [card] = h.cards.splice(Math.floor(Math.random() * h.cards.length), 1);
+          if (msg.kind === 'thief') toMaster({ t: 'give', from: msg.to, to: msg.from, card });
+          pushStatus(true);
+        }
+      }
+      break;
+    }
+  }
+}
+
+function cardsStep(mine, now) {
+  const L = track.length;
+  for (const k of mine) {
+    const h = handOf(k.slot);
+    if (h.cd > 0) h.cd = Math.max(0, h.cd - DT);
+    if (h.pending) { h.pendingT -= DT; if (h.pendingT <= 0) { h.pending = null; pushStatus(true); } }
+    // portali: passo sopra → chiedo una carta (decide il PC principale chi è arrivato prima)
+    if (k.lapCount >= 1 && !k.finished) {
+      PORTAL_FRACTIONS.forEach((f, pi) => {
+        const ps = f * L;
+        const crossed = k.prevS < ps && k.s >= ps && k.s - k.prevS < 20;
+        if (crossed && Math.abs(k.lat) < track.halfWidth + 1 && !(W.portals[pi] > now)) toMaster({ t: 'portal', slot: k.slot, pi });
+      });
+    }
+    // olio e trappole a terra
+    for (const hz of W.hazards) {
+      if (hitHazards.has(hz.id)) continue;
+      if (hz.owner === k.slot && now - hz.born < 1.2) continue;
+      if (Math.hypot(k.x - hz.x, k.z - hz.z) > 2.4 || k.air) continue;
+      hitHazards.add(hz.id);
+      const r = receive(k, hz.kind);
+      if (r === 'mirror') k.mirror = 0;
+      if (r === 'ok') vibrate(k.slot, [150]);
+      toMaster({ t: 'hazard-hit', id: hz.id });
+    }
+    // bomba: si passa toccando un altro kart
+    if (k.bombHold > 0) k.bombHold -= DT;
+    if (k.bombT > 0 && !(k.bombHold > 0) && k.contacts.length) {
+      const other = k.contacts[0];
+      const ok = karts.get(other);
+      if (ok && isLocalSlot(other)) {
+        if (receive(ok, 'bomb') === 'ok') { ok.bombT = k.bombT; ok.bombHold = 1; k.bombT = 0; vibrate(other, [60, 30, 60]); }
+      } else {
+        toMaster({ t: 'bomb', from: k.slot, to: other, left: k.bombT });
+        k.bombT = 0;
+      }
+      toMaster({ t: 'feed', text: `${nameOf(k.slot)} passa la bomba a ${nameOf(other)}!` });
+    }
+  }
+  if (!MASTER) W.feed = W.feed.filter(f => f.until > now);
 }
 
 // ------------------------------------------------------------------ interfaccia
@@ -791,6 +1081,9 @@ function frame(now) {
   try { view.render(snap, slots, dt); } catch (e) { console.error(e); }
   try { bc.postMessage({ t: 'snap', snap, players }); } catch (e) { /* niente */ }
 }
+
+// solo per i test (pc.html?debug=1)
+if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, track };
 
 drawLobby();
 startNet();

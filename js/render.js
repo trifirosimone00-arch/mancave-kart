@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { groundHeight, RAMP_LENGTH } from './track.js';
 import { MT_BLUE, MT_ORANGE } from './sim.js';
+import { PORTAL_FRACTIONS } from './cards.js';
 
 const TAG_LAYER0 = 1; // layer delle etichette nome: 1 + slot
 
@@ -311,6 +312,28 @@ function buildWorld(scene, track) {
     }
   }
 
+  // portali-carta: archi luminosi con una carta che gira
+  track.portalMeshes = PORTAL_FRACTIONS.map((f) => {
+    const p = pts[Math.floor((f * track.length) / track.ds) % count];
+    const g = new THREE.Group();
+    const glow = new THREE.MeshBasicMaterial({ color: '#ffd400' });
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(hw + 0.6, 0.45, 8, 32, Math.PI), glow);
+    arch.position.y = 0;
+    g.add(arch);
+    const cardTex = canvasTex(128, 176, (c, w, h) => {
+      c.fillStyle = '#ffffff'; c.beginPath(); c.roundRect(4, 4, w - 8, h - 8, 16); c.fill();
+      c.fillStyle = '#9b5cff'; c.beginPath(); c.roundRect(14, 14, w - 28, h - 28, 10); c.fill();
+      c.fillStyle = '#ffd400'; c.font = '900 96px Arial Black, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('?', w / 2, h / 2 + 6);
+    });
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 3.3), new THREE.MeshBasicMaterial({ map: cardTex, side: THREE.DoubleSide, transparent: true }));
+    card.position.y = hw - 1.2;
+    g.add(card);
+    g.position.set(p.x, 0, p.z);
+    g.rotation.y = Math.atan2(p.tx, p.tz);
+    scene.add(g);
+    return { g, arch, card, glow };
+  });
+
   // bandierine lungo il rettilineo di partenza
   {
     const cols = ['#e8322b', '#ffd400', '#2f6fe0', '#2ec46b'];
@@ -408,7 +431,16 @@ function makeKart(slot, name, color) {
   tag.position.set(0, 4.1, 0);
   tag.layers.set(TAG_LAYER0 + slot);
   root.add(tag);
-  return { root, body, wheels, flames, sparks, shadow, tag, color, name, spin: 0 };
+  // scudo (bolla) e bomba sopra la testa
+  const shield = new THREE.Mesh(new THREE.SphereGeometry(2.7, 18, 12), new THREE.MeshBasicMaterial({ color: '#4fc3ff', transparent: true, opacity: 0.25, depthWrite: false }));
+  shield.position.y = 1.3; shield.visible = false; root.add(shield);
+  const bomb = new THREE.Group();
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.7, 14, 10), new THREE.MeshLambertMaterial({ color: '#1b1b1b' }));
+  const fuse = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), new THREE.MeshBasicMaterial({ color: '#ff3b30' }));
+  fuse.position.y = 0.75; bomb.add(ball, fuse); bomb.position.y = 3.4; bomb.visible = false; root.add(bomb);
+  const mats = [];
+  body.traverse(o => { if (o.material && !o.material.transparent && !mats.includes(o.material)) mats.push(o.material); });
+  return { root, body, wheels, flames, sparks, shadow, tag, color, name, spin: 0, shield, bomb, fuse, mats, ghost: false };
 }
 
 // ------------------------------------------------------------------ renderer
@@ -489,7 +521,9 @@ export function createRenderer(canvas, hudRoot, track) {
         <div class="v-center"></div>
         <div class="v-msg"></div>
         <div class="v-mt"><i></i><i></i><i></i></div>
-        <div class="v-label"></div>`;
+        <div class="v-label"></div>
+        <div class="v-fog"></div>
+        <div class="v-fx"></div>`;
       hudRoot.appendChild(el);
       const cam = new THREE.PerspectiveCamera(72, 1, 0.3, 2500);
       cam.layers.enable(0);
@@ -501,9 +535,39 @@ export function createRenderer(canvas, hudRoot, track) {
         lap: el.querySelector('.v-lap'), time: el.querySelector('.v-time'), map: el.querySelector('.v-map'),
         center: el.querySelector('.v-center'), msg: el.querySelector('.v-msg'), mt: el.querySelector('.v-mt'),
         label: el.querySelector('.v-label'), msgUntil: 0, lastLap: -1, lastPlace: 0,
+        fog: el.querySelector('.v-fog'), fx: el.querySelector('.v-fx'),
       };
     });
     hudRoot.dataset.n = String(n);
+    feedEl = document.createElement('div');
+    feedEl.className = 'feed';
+    hudRoot.appendChild(feedEl);
+  }
+  let feedEl = null, feedSig = '';
+
+  // oggetti delle carte sulla pista (olio, missili): li riuso
+  const pool = { oil: new Map(), missile: new Map() };
+  const oilGeo = new THREE.CircleGeometry(2.2, 20);
+  const oilMat = new THREE.MeshLambertMaterial({ color: '#141414', emissive: '#2a1f3d', emissiveIntensity: 0.5 });
+  function makeMissile() {
+    const g = new THREE.Group();
+    const bodyM = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1.6, 10), new THREE.MeshLambertMaterial({ color: '#e8322b' }));
+    bodyM.rotation.x = Math.PI / 2;
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.7, 10), new THREE.MeshLambertMaterial({ color: '#ffffff' }));
+    nose.rotation.x = Math.PI / 2; nose.position.z = 1.15;
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.9, 8), new THREE.MeshBasicMaterial({ color: '#ffb300' }));
+    flame.rotation.x = -Math.PI / 2; flame.position.z = -1.2;
+    g.add(bodyM, nose, flame);
+    return g;
+  }
+  function syncPool(kind, list, make, place) {
+    const seen = new Set();
+    for (const it of list || []) {
+      let m = pool[kind].get(it.id);
+      if (!m) { m = make(); scene.add(m); pool[kind].set(it.id, m); }
+      place(m, it); seen.add(it.id);
+    }
+    for (const [id, m] of pool[kind]) if (!seen.has(id)) { scene.remove(m); pool[kind].delete(id); }
   }
 
   function rects(n, W, H) {
@@ -571,6 +635,21 @@ export function createRenderer(canvas, hudRoot, track) {
           f.material.color.set(k.boostKind === 'blue' ? '#4fc3ff' : '#ff9a1f');
         }
       });
+      // effetti delle carte
+      m.shield.visible = k.shieldT > 0 || k.mirror > 0;
+      if (m.shield.visible) {
+        m.shield.material.color.set(k.mirror > 0 ? '#e0e6ee' : '#4fc3ff');
+        m.shield.material.opacity = 0.22 + Math.sin(tsec * 6) * 0.06;
+      }
+      m.bomb.visible = k.bombT > 0;
+      if (m.bomb.visible) m.fuse.visible = Math.sin(tsec * (k.bombT < 3 ? 30 : 12)) > 0;
+      const ghost = k.ghostT > 0;
+      if (ghost !== m.ghost) {
+        m.mats.forEach(mt => { mt.transparent = ghost; mt.opacity = ghost ? 0.35 : 1; mt.needsUpdate = true; });
+        m.ghost = ghost;
+      }
+      const sc0 = k.miniT > 0 ? 0.6 : 1;
+      m.root.scale.setScalar(m.root.scale.x + (sc0 - m.root.scale.x) * Math.min(1, dt * 8));
       // scintille
       const showSparks = k.drifting && k.driftT > 0.2;
       const sc = k.driftCharge >= MT_ORANGE ? '#ff8a00' : k.driftCharge >= MT_BLUE ? '#3fb8ff' : '#fff7c2';
@@ -582,6 +661,25 @@ export function createRenderer(canvas, hudRoot, track) {
       });
     }
     for (const [slot, m] of karts) if (!present.has(slot)) { scene.remove(m.root, m.shadow); karts.delete(slot); }
+
+    // portali: accesi se si può pescare
+    (track.portalMeshes || []).forEach((pm, i) => {
+      const ready = !snap.portals || snap.portals[i] !== false;
+      pm.card.visible = ready;
+      pm.card.rotation.y = tsec * 2.5;
+      pm.glow.color.set(ready ? '#ffd400' : '#6b7080');
+    });
+    syncPool('oil', snap.hazards, () => { const o = new THREE.Mesh(oilGeo, oilMat); o.rotation.x = -Math.PI / 2; return o; },
+      (o, h) => o.position.set(h.x, 0.07, h.z));
+    syncPool('missile', snap.missiles, makeMissile, (o, m) => { o.position.set(m.x, 1.1, m.z); o.rotation.y = m.yaw; });
+    if (feedEl) {
+      const fs = (snap.feed || []).join('|');
+      if (fs !== feedSig) {
+        feedSig = fs;
+        feedEl.innerHTML = '';
+        for (const t of snap.feed || []) { const d = document.createElement('div'); d.textContent = t; feedEl.appendChild(d); }
+      }
+    }
 
     const rs = rects(slots.length, W, H);
     renderer.setScissorTest(true);
@@ -644,6 +742,18 @@ export function createRenderer(canvas, hudRoot, track) {
         bars[1].className = c >= MT_BLUE ? 'on b' : '';
         bars[2].className = c >= MT_ORANGE ? 'on o' : '';
         v.mt.classList.toggle('show', !!k.drifting);
+        v.fog.style.opacity = k.fogT > 0 ? Math.min(0.94, k.fogT * 0.6) : 0;
+        const fx = [];
+        if (k.shieldT > 0) fx.push(`Scudo ${Math.ceil(k.shieldT)}`);
+        if (k.mirror > 0) fx.push('Specchio');
+        if (k.ghostT > 0) fx.push(`Fantasma ${Math.ceil(k.ghostT)}`);
+        if (k.invertT > 0) fx.push('Sterzo al contrario!');
+        if (k.stopT > 0) fx.push('Bloccato!');
+        if (k.miniT > 0) fx.push('Mini');
+        if (k.bombT > 0) fx.push(`BOMBA ${Math.ceil(k.bombT)}`);
+        const fxs = fx.join(' · ');
+        if (v.fx.textContent !== fxs) v.fx.textContent = fxs;
+        v.fx.classList.toggle('bomb', k.bombT > 0);
       }
       // centro: countdown e messaggi
       let center = '';

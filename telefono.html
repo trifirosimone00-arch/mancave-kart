@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#12162a">
+<title>Mancave Kart – Telefono</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/phone.css">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+<!-- 1. entrata -->
+<section id="join" class="screen">
+  <h1 class="logo small">MANCAVE<br>KART</h1>
+  <form id="join-form" autocomplete="off">
+    <label class="field" id="code-field"><span class="label">Nome stanza</span>
+      <input id="code" maxlength="12" inputmode="text" autocapitalize="characters" placeholder="MANCAVE" required></label>
+    <label class="field"><span class="label">Il tuo nome</span>
+      <input id="name" maxlength="14" placeholder="Es. Simo" required></label>
+    <div class="field"><span class="label">Colore del kart</span><div class="swatches" id="swatches"></div></div>
+    <div class="field"><span class="label">Come sterzi</span>
+      <div class="seg wide" id="mode">
+        <button type="button" data-m="tilt" class="on">Inclinando il telefono</button>
+        <button type="button" data-m="touch">Tasti</button>
+      </div></div>
+    <button class="btn primary big" type="submit" id="enter">ENTRA</button>
+    <p class="err" id="join-err"></p>
+  </form>
+</section>
+
+<!-- 2. attesa in lobby -->
+<section id="wait" class="screen hidden">
+  <div class="mini-kart" id="wait-kart"></div>
+  <h2 class="display" id="wait-title">Sei dentro!</h2>
+  <p class="muted" id="wait-text">Aspetta che il capo stanza faccia partire la gara.</p>
+  <div id="captain" class="hidden">
+    <span class="label">Giri</span>
+    <div class="seg" id="laps"></div>
+    <button class="btn primary big" type="button" id="start">INIZIA LA GARA</button>
+  </div>
+  <p class="muted small">Durante la gara tieni il telefono in orizzontale, come un volante.</p>
+  <button class="btn ghost" type="button" id="leave">Esci</button>
+</section>
+
+<!-- 3. volante -->
+<section id="pad" class="hidden">
+  <div class="pad-top">
+    <div class="pad-info"><span class="pad-place" id="p-place">–</span><span class="pad-lap" id="p-lap"></span></div>
+    <div class="pad-msg" id="p-msg"></div>
+    <div class="pad-tools">
+      <button class="icon" type="button" id="b-pause" aria-label="Pausa"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/></svg></button>
+      <button class="icon" type="button" id="b-set" aria-label="Impostazioni"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.4 4.6-.1-2.2 2-1.6-2-3.4-2.4.9-1.8-1.1L15.7 3h-4l-.5 2.6-1.8 1.1L7 5.8 5 9.2l2 1.6v2.2L5 14.6 7 18l2.4-.9 1.8 1.1.5 2.6h4l.5-2.6 1.8-1.1 2.4.9 2-3.4-2-1.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+    </div>
+  </div>
+  <div class="pad-body">
+    <div class="pad-left" id="left-tilt">
+      <button class="pbtn brake" type="button" id="b-brake-l">FRENO<small>e retro</small></button>
+    </div>
+    <div class="pad-left hidden" id="left-touch">
+      <button class="pbtn arrow" type="button" id="b-left" aria-label="Sinistra"><svg viewBox="0 0 24 24" width="54" height="54" aria-hidden="true"><path d="M15 4 7 12l8 8" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button class="pbtn arrow" type="button" id="b-right" aria-label="Destra"><svg viewBox="0 0 24 24" width="54" height="54" aria-hidden="true"><path d="m9 4 8 8-8 8" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+    <div class="pad-center">
+      <svg id="wheel" viewBox="0 0 170 170" width="150" height="150" role="img" aria-label="Volante">
+        <circle cx="85" cy="85" r="70" fill="none" stroke="#e8ecf5" stroke-width="16"/>
+        <circle cx="85" cy="85" r="18" id="wheel-hub" fill="#e8322b" stroke="#e8ecf5" stroke-width="6"/>
+        <path d="M67 85 L18 85 M103 85 L152 85 M85 103 L85 152" stroke="#e8ecf5" stroke-width="12" stroke-linecap="round"/>
+        <rect x="79" y="10" width="12" height="18" rx="3" id="wheel-mark" fill="#e8322b"/>
+      </svg>
+      <div class="muted small" id="steer-hint">Inclina il telefono per sterzare</div>
+    </div>
+    <div class="pad-right">
+      <button class="pbtn drift" type="button" id="b-drift">DERAPA<small>tieni premuto</small></button>
+      <button class="pbtn brake small hidden" type="button" id="b-brake-r">FRENO</button>
+    </div>
+  </div>
+</section>
+
+<!-- 4. fine gara -->
+<section id="end" class="screen hidden">
+  <div class="end-place display" id="end-place">1°</div>
+  <p class="muted" id="end-text">Ottima gara!</p>
+  <div id="end-captain" class="hidden end-actions">
+    <button class="btn primary big" type="button" id="again">RIVINCITA</button>
+    <button class="btn ghost" type="button" id="tolobby">Torna alla lobby</button>
+  </div>
+  <p class="muted small" id="end-wait">Il capo stanza decide se fare la rivincita.</p>
+</section>
+
+<!-- pannelli -->
+<div id="rotate" class="cover hidden"><div><svg viewBox="0 0 24 24" width="64" height="64" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 8a8 8 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><p class="display">Gira il telefono</p><p class="muted">Tienilo in orizzontale, come un volante</p><button class="btn ghost" type="button" id="rot-ok">Ho il blocco rotazione: continua</button></div></div>
+<div id="paused" class="cover hidden"><div><p class="display big-t">PAUSA</p><p class="muted" id="paused-msg"></p><button class="btn primary" type="button" id="unpause">RIPRENDI</button></div></div>
+<div id="conn" class="cover hidden"><div><p class="display">Riconnessione…</p><p class="muted" id="conn-msg">Controlla il Wi-Fi</p></div></div>
+<div id="settings" class="cover hidden"><div class="sheet">
+  <p class="display">Impostazioni</p>
+  <div class="field"><span class="label">Come sterzi</span>
+    <div class="seg wide" id="mode2">
+      <button type="button" data-m="tilt">Inclinando</button>
+      <button type="button" data-m="touch">Tasti</button>
+    </div></div>
+  <label class="field"><span class="label">Sensibilità sterzo: <b id="sens-v"></b></span>
+    <input type="range" id="sens" min="15" max="50" step="1"></label>
+  <label class="check"><input type="checkbox" id="invert"> Inverti lo sterzo</label>
+  <div class="row">
+    <button class="btn ghost" type="button" id="calib">Centra il volante</button>
+    <button class="btn primary" type="button" id="set-close">FATTO</button>
+  </div>
+</div></div>
+
+<script type="module" src="js/phone.js"></script>
+</body>
+</html>

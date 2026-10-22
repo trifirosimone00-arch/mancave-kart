@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mancave Kart – Schermo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"></div>
+
+<div id="screenbar">
+  <span class="label">Schermo</span>
+  <div class="seg" id="sb-layout"></div>
+  <span id="sb-slots"></span>
+  <button class="btn ghost" id="sb-open" type="button">+ Altro monitor</button>
+  <button class="btn ghost" id="sb-full" type="button">Schermo intero</button>
+</div>
+
+<div id="lobby" class="overlay">
+  <div class="panel">
+    <div>
+      <h1 class="logo">MANCAVE<br>KART</h1>
+      <p class="sub" id="subtitle">Livello 1 · pista di prova</p>
+      <div class="qr" id="qr">Preparo il QR…</div>
+      <p class="hint" style="margin:8px 0 0">Scansiona col telefono per entrare da questo schermo</p>
+      <div style="margin-top:14px" class="label">Stanza</div>
+      <div class="code" id="code">····</div>
+      <div class="url" id="url"></div>
+      <div class="netstate"><span class="dot wait" id="netdot"></span><span id="nettext">Collegamento…</span></div>
+    </div>
+    <div>
+      <div class="label" style="margin-bottom:10px">Piloti</div>
+      <div class="players" id="players"></div>
+      <div class="settings">
+        <div><span class="label">Giri</span><div class="seg" id="laps"></div></div>
+        <div><span class="label">Questo schermo</span><div class="seg" id="layout"></div></div>
+        <div><span class="label">Altri monitor</span><button class="btn ghost" id="open-screen" type="button">+ Apri altro monitor</button></div>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="kbd" type="button">Prova con la tastiera</button>
+        <button class="btn primary" id="start" type="button" disabled>INIZIA LA GARA</button>
+        <p class="hint hidden" id="wait-start" style="margin:0">La gara la fa partire il PC principale della stanza.</p>
+      </div>
+      <div class="remote" id="room-box">
+        <div class="label">Gioca a distanza</div>
+        <p class="hint">Chi gioca da casa sua apre <b>mancave-kart-gara.netlify.app</b> sul suo PC o tablet, preme <b>Entra in una stanza</b> e scrive il nome della stanza. Poi scansiona col telefono il QR che compare sul suo schermo.</p>
+        <p class="hint" id="stations-count"></p>
+        <label class="copyrow"><span class="label">Nome</span><input id="room-name" maxlength="12" aria-label="Nome della stanza"><button class="btn ghost" type="button" id="room-save">Cambia</button></label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <div class="panel">
+    <h2>PAUSA</h2>
+    <p id="pause-msg">La gara è in pausa</p>
+    <div class="center-actions">
+      <button class="btn primary" id="resume" type="button">RIPRENDI</button>
+      <button class="btn ghost" id="quit" type="button">Torna alla lobby</button>
+    </div>
+  </div>
+</div>
+
+<div id="podium" class="overlay hidden">
+  <div class="panel">
+    <h2>CLASSIFICA</h2>
+    <div class="stands" id="stands"></div>
+    <table class="results" id="results"></table>
+    <div class="center-actions">
+      <button class="btn primary" id="again" type="button">RIVINCITA</button>
+      <button class="btn ghost" id="tolobby" type="button">Torna alla lobby</button>
+    </div>
+  </div>
+</div>
+
+<div id="lost" class="overlay hidden"><div class="panel" style="text-align:center"><h2 class="display" style="color:#ffd400;margin:0 0 8px">Collegamento perso</h2><p class="hint">Mi ricollego alla stanza…</p></div></div>
+<div id="toast" class="toast hidden"></div>
+<script type="module" src="js/station.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mancave Kart</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<style>
+  body { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px; background: radial-gradient(circle at 50% 0%, #26306a 0%, #12162a 60%); }
+  main { width: min(900px, 100%); text-align: center; }
+  .logo { font-size: clamp(48px, 11vw, 92px); }
+  .choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-top: 30px; }
+  .choice { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 26px 18px; border-radius: 24px; background: var(--ink-2); border: 3px solid var(--ink-3); color: #fff; text-decoration: none; font: inherit; cursor: pointer; }
+  .choice:hover, .choice.on { border-color: var(--yellow); }
+  .choice b { font-family: 'Bungee', sans-serif; font-weight: 400; font-size: 22px; color: var(--yellow); }
+  .choice span { color: var(--muted); font-weight: 800; }
+  #join-box { margin-top: 22px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  #join-box input { font: inherit; font-family: 'Bungee', sans-serif; font-size: 26px; letter-spacing: 3px; text-transform: uppercase; padding: 10px 16px; border-radius: 14px; border: 2px solid var(--ink-3); background: var(--ink-2); color: #fff; width: min(320px, 100%); }
+  @media (max-width: 760px) { .choices { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1 class="logo">MANCAVE<br>KART</h1>
+  <p class="sub">Livello 1 · prototipo</p>
+  <div class="choices">
+    <a class="choice" href="pc.html">
+      <svg viewBox="0 0 24 24" width="52" height="52" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12" rx="2" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M8 20h8M12 16v4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <b>CREA LA STANZA</b><span>Sul PC principale, collegato alla TV</span>
+    </a>
+    <button class="choice" type="button" id="join-btn">
+      <svg viewBox="0 0 24 24" width="52" height="52" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12" rx="2" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M9 10h6M13 8l2 2-2 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <b>ENTRA IN UNA STANZA</b><span>Per chi gioca da casa sua: PC, TV o tablet</span>
+    </button>
+    <a class="choice" href="telefono.html">
+      <svg viewBox="0 0 24 24" width="52" height="52" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M11 18.5h2" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <b>TELEFONO</b><span>Meglio: scansiona il QR sullo schermo</span>
+    </a>
+  </div>
+  <form id="join-box" class="hidden">
+    <input id="room" maxlength="12" placeholder="MANCAVE" aria-label="Nome della stanza" autocomplete="off">
+    <button class="btn primary" type="submit">ENTRA</button>
+  </form>
+</main>
+<script>
+  const box = document.getElementById('join-box');
+  const input = document.getElementById('room');
+  try { input.value = localStorage.getItem('mck-lastroom') || ''; } catch (e) {}
+  document.getElementById('join-btn').onclick = () => { box.classList.remove('hidden'); document.getElementById('join-btn').classList.add('on'); input.focus(); };
+  box.onsubmit = (e) => {
+    e.preventDefault();
+    const v = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!v) { input.focus(); return; }
+    try { localStorage.setItem('mck-lastroom', v); } catch (err) {}
+    location.href = 'pc.html?join=' + v;
+  };
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mancave Kart – Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"></div>
+
+<div id="screenbar">
+  <span class="label">Schermo</span>
+  <div class="seg" id="sb-layout"></div>
+  <span id="sb-slots"></span>
+    <button class="btn ghost" id="sb-full" type="button">Schermo intero</button>
+</div>
+
+<div id="waiting" class="overlay">
+  <div class="panel" style="text-align:center">
+    <h1 class="logo">MANCAVE<br>KART</h1>
+    <p class="sub" id="wait-msg">In attesa dello schermo principale…</p>
+    <div id="who"></div>
+    <p class="hint">Premi "Schermo intero" per vedere la gara a tutto schermo.</p>
+    <button class="btn primary" id="go-full" type="button">SCHERMO INTERO</button>
+  </div>
+</div>
+<div id="pause" class="overlay hidden"><div class="panel" style="text-align:center"><h2 style="font-family:Bungee,sans-serif;color:#ffd400;font-size:48px;margin:0">PAUSA</h2></div></div>
+<div id="toast" class="toast hidden"></div>
+<script type="module" src="js/monitor.js"></script>
+</body>
+</html>

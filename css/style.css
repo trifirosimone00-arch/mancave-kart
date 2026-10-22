@@ -150,7 +150,7 @@ button { font-family: inherit; cursor: pointer; }
 /* carte */
 .view > .v-fog, .view > .v-fx { display: block; }
 .v-fog { position: absolute; inset: 0; background: radial-gradient(circle at 50% 60%, rgba(120,130,150,0.85), rgba(40,44,60,0.97)); opacity: 0; transition: opacity 0.3s; pointer-events: none; }
-.v-fx { position: absolute; left: 50%; top: 3.5%; transform: translateX(-50%); font-weight: 900; font-size: clamp(13px, 2.6vmin, 24px); color: #fff; text-shadow: 0 2px 0 #1a1a1a, 0 0 6px #000; white-space: nowrap; }
+.v-fx { position: absolute; left: 50%; top: 16%; transform: translateX(-50%); font-weight: 900; font-size: clamp(13px, 2.6vmin, 24px); color: #fff; text-shadow: 0 2px 0 #1a1a1a, 0 0 6px #000; white-space: nowrap; }
 .v-fx.bomb { color: #ff5a4a; }
 .feed { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; z-index: 2; }
 .feed div { background: rgba(14,18,34,0.85); color: #fff; font-weight: 900; font-size: clamp(14px, 2.4vmin, 22px); padding: 6px 14px; border-radius: 999px; border: 2px solid #ffd400; }

@@ -316,16 +316,16 @@ export function kgStep(ka, ks, dt) {
     }
     case 'aspirapolvere': {
       const V = ka.vac;
-      V.sp = Math.min(21, 8 + ka.t * 0.28);
+      V.sp = Math.min(25, 11 + ka.t * 0.4);
       let tgt = null, bd = Infinity;
       for (const k of alive) { const d = d2(k, V); if (d < bd) { bd = d; tgt = k; } }
       if (tgt) {
         let want = Math.atan2(tgt.x - V.x, tgt.z - V.z), dd = want - V.yaw;
         while (dd > Math.PI) dd -= 2 * Math.PI; while (dd < -Math.PI) dd += 2 * Math.PI;
-        V.yaw += Math.sign(dd) * Math.min(Math.abs(dd), 1.9 * dt);
+        V.yaw += Math.sign(dd) * Math.min(Math.abs(dd), 2.6 * dt);
         V.x += Math.sin(V.yaw) * V.sp * dt; V.z += Math.cos(V.yaw) * V.sp * dt;
         Object.assign(V, clampIn(V, 5));
-        if (bd < 5) { ka.out[tgt.slot] = ka.t; fx('suck', tgt.x, tgt.z, tgt.slot); }
+        if (bd < 5.6) { ka.out[tgt.slot] = ka.t; fx('suck', tgt.x, tgt.z, tgt.slot); }
       }
       if (alive.length <= 1 && ks.length > 1) ka.over = true;
       break;

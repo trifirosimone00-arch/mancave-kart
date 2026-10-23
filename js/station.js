@@ -3,7 +3,7 @@
 // - Schermo collegato (pc.html?join=STANZA): per chi gioca da casa sua.
 // Ogni schermo calcola i kart dei telefoni collegati a lui (niente ritardo nella guida)
 // e scambia via internet solo le posizioni degli altri.
-import { buildTrack } from './track.js';
+import { buildTrack, obstaclesAt, TRACK_LIST } from './track.js';
 import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance, placeAt, giveBoost } from './sim.js';
 import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, PORTAL_COOLDOWN, PORTAL_FRACTIONS } from './cards.js';
 import { createRenderer } from './render.js';
@@ -23,6 +23,7 @@ const params = new URLSearchParams(location.search);
 const cleanRoom = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
 const JOIN = cleanRoom(params.get('join'));
 const MASTER = !JOIN;
+const MANUAL = params.get('debug') === '1' && params.get('manual') === '1';
 const MAX_PLAYERS = 4;
 const INTRO_TIME = 5;
 const COUNTDOWN = 3.2;
@@ -39,7 +40,9 @@ const store = {
   set(k, v) { try { localStorage.setItem('mck-' + k, JSON.stringify(v)); } catch (e) { /* niente */ } },
 };
 
-const track = buildTrack();
+const TRACK_IDS = TRACK_LIST.map(t => t.id);
+const startTrack = TRACK_IDS.includes(params.get('track')) ? params.get('track') : (TRACK_IDS.includes(localStorage.getItem('mck-track-id')) ? localStorage.getItem('mck-track-id') : 'prova');
+let track = buildTrack(startTrack);
 const view = createRenderer($('game'), $('hud'), track);
 const audio = createAudio();
 view.onEvent((e) => audio.play(e));
@@ -63,7 +66,7 @@ const myId = PEER_PREFIX + room + (suffix ? '-' + suffix : '');
 const W = {                       // stato della stanza (sul PC principale è la verità)
   q: 0, raceId: 0, phase: 'lobby', laps: 3, raceTime: 0, countdown: 0, introT: 0,
   paused: false, pauseMsg: '', players: [], grid: [], karts: [], results: [], captain: -1,
-  portals: PORTAL_FRACTIONS.map(() => 0), hazards: [], missiles: [], feed: [],
+  portals: track.portalFractions.map(() => 0), hazards: [], missiles: [], feed: [], trackId: track.id,
   pit: null, pitsDone: 0, pitUsed: [], lampo: null,
 };
 W.mgShort = !!store.get('mg-short', false);
@@ -397,6 +400,7 @@ function onMasterMsg(msg) {
 
 function applyWorld(msg) {
   const prevPhase = W.phase;
+  if (msg.trackId && msg.trackId !== track.id) switchTrack(msg.trackId);
   Object.assign(W, msg);
   worldAt = performance.now();
   for (const s of msg.karts || []) if (!isLocalSlot(s.slot)) pushRemote(s, msg.q);
@@ -444,13 +448,25 @@ function remoteRender(slot) {
 }
 
 // ------------------------------------------------------------------ gara
+// cambio pista (solo in sala d'attesa): ricostruisco la pista e il mondo 3D
+function switchTrack(id) {
+  if (!TRACK_IDS.includes(id) || id === track.id) return;
+  track = buildTrack(id);
+  view.setTrack(track);
+  W.trackId = id;
+  W.portals = track.portalFractions.map(() => 0);
+  karts.clear(); remoteBuf.clear();
+  if (MASTER) { try { localStorage.setItem('mck-track-id', id); } catch (e) { /* niente */ } }
+  lobbySig = ''; drawLobby();
+}
+
 function startRace() {
   if (!W.players.length) return;
   const order = [...W.players].sort(() => Math.random() - 0.5);
   W.grid = order.map((p, i) => ({ slot: p.slot, gi: i }));
   W.raceId = Date.now() % 1e9;
   W.phase = 'intro'; W.introT = 0; W.raceTime = 0; W.countdown = COUNTDOWN; W.results = [];
-  W.portals = PORTAL_FRACTIONS.map(() => 0); W.hazards = []; W.missiles = []; W.feed = [];
+  W.portals = track.portalFractions.map(() => 0); W.hazards = []; W.missiles = []; W.feed = [];
   W.pit = null; W.lampo = null; W.pitsDone = 0; W.pitUsed = []; mgStates.clear(); botMg.clear(); appliedPrizes.clear();
   firstFinishAt = -1; finishT = 0;
   for (const l of locals.values()) if (l.brain) l.brain = newBrain(cpuLevel);
@@ -636,6 +652,7 @@ function simStep() {
       }
     }
     collideKarts(mine);
+    hitObstacles(mine, now);
     const ghosts = others.map(k => ({ ...(remoteRender(k.slot) || k), slot: k.slot })).filter(Boolean);
     collideWithRemote(mine, ghosts);
     if (W.phase === 'race') cardsStep(mine, now);
@@ -665,6 +682,24 @@ function simStep() {
   }
 }
 
+// aspirapolvere robot e gatto (pista Mancave): chi li prende fa un testacoda
+function hitObstacles(mine, now) {
+  const obs = obstaclesAt(track, now);
+  if (!obs.length) return;
+  for (const k of mine) {
+    if (k.obsCD > 0) { k.obsCD -= DT; continue; }
+    for (const o of obs) {
+      if (Math.hypot(k.x - o.x, k.z - o.z) > o.r + 1.3 || k.y > o.y + 2) continue;
+      k.obsCD = 1.5;
+      if (k.shieldT > 0) break;
+      k.spinT = Math.max(k.spinT, 0.9); k.speed *= 0.5;
+      vibrate(k.slot, [120]);
+      addNote(k.slot, o.kind === 'cat' ? 'MIAO! Il gatto!' : 'L\'aspirapolvere!', 'bad');
+      break;
+    }
+  }
+}
+
 // ------------------------------------------------------------------ messaggi di rete
 const r2 = (v) => Math.round(v * 100) / 100;
 function compact(k) {
@@ -680,7 +715,7 @@ function compact(k) {
 function worldMsg() {
   W.q++;
   return {
-    portals: W.portals, hazards: W.hazards, missiles: W.missiles, feed: W.feed, pit: W.pit, pitsDone: W.pitsDone, lampo: W.lampo,
+    portals: W.portals, hazards: W.hazards, missiles: W.missiles, feed: W.feed, pit: W.pit, pitsDone: W.pitsDone, lampo: W.lampo, trackId: W.trackId,
     t: 'w', q: W.q, raceId: W.raceId, phase: W.phase, laps: W.laps, raceTime: W.raceTime, countdown: W.countdown,
     introT: W.introT, paused: W.paused, pauseMsg: W.pauseMsg, captain: W.captain, grid: W.grid, results: W.results,
     players: W.players.map(p => ({ slot: p.slot, cid: p.cid, name: p.name, color: p.color, station: p.station, connected: p.connected, kbd: p.kbd, cpu: p.cpu })),
@@ -730,7 +765,7 @@ function renderSnap() {
     introT: Math.min(1, clock.introT / INTRO_TIME), paused: W.paused, karts: list,
     portals: W.portals.map(u => !(u > clock.raceTime)), hazards: W.hazards.filter(h => h.kind !== 'trap'), missiles: W.missiles,
     feed: W.feed.map(f => f.text), pit: W.phase === 'pit' ? pitView() : null,
-    notes: notes.filter(n => n.until > performance.now()), pitAt: W.lampo ? null : nextPitAt(),
+    notes: notes.filter(n => n.until > performance.now()), pitAt: W.lampo ? null : nextPitAt(), trackId: track.id,
     lampo: W.lampo && W.phase === 'race' ? { mission: W.lampo.mission, done: W.lampo.done, t: clock.raceTime - W.lampo.t0 } : null,
   };
 }
@@ -1016,7 +1051,7 @@ function cardsStep(mine, now) {
     if (h.cd > 0) h.cd = Math.max(0, h.cd - DT * (k.slowmoT > 0 ? 0.5 : 1));   // Telecomando: anche la ricarica va piano
     // portali: passo sopra → chiedo una carta (decide il PC principale chi è arrivato prima)
     if (k.lapCount >= 1 && !k.finished) {
-      PORTAL_FRACTIONS.forEach((f, pi) => {
+      track.portalFractions.forEach((f, pi) => {
         const ps = f * L;
         const crossed = k.prevS < ps && k.s >= ps && k.s - k.prevS < 20;
         if (crossed && Math.abs(k.lat) < track.halfWidth + 1 && !(W.portals[pi] > now) && h.cards.length < HAND_SIZE) toMaster({ t: 'portal', slot: k.slot, pi });
@@ -1065,7 +1100,7 @@ function onPhaseChange() {
 let lobbySig = '';
 let cpuLevel = CPU_LEVELS[store.get('cpu-level', 'normale')] ? store.get('cpu-level', 'normale') : 'normale';
 function drawLobby() {
-  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel, W.mgShort, W.quizCats]);
+  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel, W.mgShort, W.quizCats, track.id]);
   if (sig === lobbySig) return;
   lobbySig = sig;
   const el = $('players');
@@ -1117,6 +1152,17 @@ function drawLobby() {
   $('cpu-box').classList.toggle('hidden', !MASTER);
   $('mg-settings').classList.toggle('hidden', !MASTER);
   drawMgSettings();
+  const tr = $('track-sel');
+  if (tr) {
+    tr.innerHTML = '';
+    for (const t of TRACK_LIST) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = t.name; b.className = track.id === t.id ? 'on' : '';
+      b.disabled = !MASTER;
+      b.onclick = () => { if (MASTER && W.phase === 'lobby') { switchTrack(t.id); pushStatus(true); } };
+      tr.appendChild(b);
+    }
+  }
   $('cpu-add').disabled = W.players.length >= MAX_PLAYERS;
   $('cpu-add').textContent = W.players.length >= MAX_PLAYERS ? 'Stanza piena' : '+ Aggiungi computer';
   const lv = $('cpu-level');
@@ -1282,6 +1328,7 @@ setInterval(() => {
   acc += Math.min(0.25, (now - lastTick) / 1000);
   lastTick = now;
   let steps = 0;
+  if (MANUAL) acc = 0;     // (solo test) il tempo lo fa avanzare __mck.advance
   while (acc >= DT && steps < 15) { simStep(); acc -= DT; steps++; }
   if (steps === 15) acc = 0;
   netTick(now);
@@ -1295,7 +1342,7 @@ setInterval(() => {
 
 let last = performance.now();
 function frame(now) {
-  requestAnimationFrame(frame);
+  if (!MANUAL) requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   let snap = renderSnap();
@@ -1303,6 +1350,7 @@ function frame(now) {
   const players = playerList();
   const here = players.filter(p => p.here);
   let slots = W.phase === 'lobby' ? [-1] : screen.slots(screen.mode === 'auto' && here.length ? here : players);
+  if (window.__forceSlots && W.phase !== 'lobby') slots = window.__forceSlots;   // solo test (video)
   recordReplay(snap, now);
   if (W.phase === 'podium') {
     const r = replaySnap(now);
@@ -1324,13 +1372,13 @@ const isBot = (l) => !!(l.brain || l.cid.startsWith('kbd'));
 function nextPitAt() {
   const laps = pitLaps(W.laps);
   if (W.pitsDone >= laps.length || !['race', 'countdown'].includes(W.phase)) return null;
-  return (laps[W.pitsDone] - 1 + PIT_FRACTION) * track.length;
+  return (laps[W.pitsDone] - 1 + track.pitFraction) * track.length;
 }
 
 function checkPit() {
   const laps = pitLaps(W.laps);
   if (W.pitsDone >= laps.length) return;
-  const at = (laps[W.pitsDone] - 1 + PIT_FRACTION) * track.length;
+  const at = (laps[W.pitsDone] - 1 + track.pitFraction) * track.length;
   let lead = -Infinity;
   for (const k of karts.values()) if (!k.finished) lead = Math.max(lead, raceDistance(track, k));
   if (lead >= at) startPit();
@@ -1656,10 +1704,27 @@ function replaySnap(now) {
   return { slot: win, snap: { phase: 'replay', laps: W.laps, raceTime: 0, countdown: 0, introT: 0, paused: false, karts, portals: W.portals.map(() => true), hazards: a.hazards || [], missiles: a.missiles || [], feed: [], notes: [] } };
 }
 
+// solo per i test: avanzare a scatti (per registrare i video fotogramma per fotogramma)
+function advance(frames = 1, fps = 30, drawAll = true) {
+  // l'orologio finto vale solo mentre avanzo
+  const real = performance.now;
+  performance.now = () => window.__vt || 0;
+  try { advanceInner(frames, fps, drawAll); } finally { performance.now = real; }
+}
+function advanceInner(frames, fps, drawAll) {
+  for (let f = 0; f < frames; f++) {
+    for (let k = 0; k < Math.round(60 / fps); k++) simStep();
+    window.__vt = (window.__vt || 0) + 1000 / fps;
+    netTick(window.__vt);
+    pushStatus(false);
+    if (drawAll || f === frames - 1) frame(window.__vt);
+  }
+}
+
 // solo per i test (pc.html?debug=1)
-if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, track, mgStates, startPit, view };
+if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, get track() { return track; }, mgStates, startPit, view, advance, switchTrack };
 
 drawLobby();
 startNet();
-requestAnimationFrame(frame);
+if (!MANUAL) requestAnimationFrame(frame); else frame(0);
 window.addEventListener('beforeunload', () => { if (peer) peer.destroy(); });

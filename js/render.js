@@ -1,9 +1,9 @@
 // Grafica 3D: pista di prova, kart, telecamere per riquadro, HUD stile Wii.
 import * as THREE from 'three';
-import { groundHeight, RAMP_LENGTH } from './track.js';
+import { groundHeight, RAMP_LENGTH, obstaclesAt } from './track.js';
 import { MT_BLUE, MT_ORANGE } from './sim.js';
-import { PORTAL_FRACTIONS } from './cards.js';
-import { PIT_FRACTION, LAMPO, LAMPO_MAX } from './minigames.js';
+import { LAMPO, LAMPO_MAX } from './minigames.js';
+import { buildMancave } from './render-mancave.js';
 
 const TAG_LAYER0 = 1; // layer delle etichette nome: 1 + slot
 
@@ -24,7 +24,7 @@ function canvasTex(w, h, draw, repeat) {
 }
 
 // ------------------------------------------------------------------ mondo
-function buildWorld(scene, track) {
+function buildProva(scene, track) {
   const R = rng(7);
   const { pts, count, halfWidth: hw, wall } = track;
 
@@ -46,7 +46,7 @@ function buildWorld(scene, track) {
   const sun = new THREE.DirectionalLight('#fff4dc', 1.6);
   sun.position.set(-300, 500, -200);
   scene.add(sun);
-  scene.fog = new THREE.Fog('#d9f0ff', 260, 900);
+  scene.userData.fog = new THREE.Fog('#d9f0ff', 260, 900);
 
   // centro della pista
   let cx = 0, cz = 0;
@@ -189,6 +189,87 @@ function buildWorld(scene, track) {
     scene.add(new THREE.Mesh(sides, new THREE.MeshLambertMaterial({ map: stripes, side: THREE.DoubleSide })));
   }
 
+  // alberi (istanziati)
+  {
+    const N = 360;
+    const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.7, 3, 6), new THREE.MeshLambertMaterial({ color: '#8a5a33' }), N);
+    const crown = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(3.4, 0), new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), N);
+    const cone = new THREE.InstancedMesh(new THREE.ConeGeometry(3, 8, 7), new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), N);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
+    const greens = ['#2f9e44', '#3fb553', '#278c3a', '#57c25e', '#1f7a33'].map(c => new THREE.Color(c));
+    let placed = 0, cones = 0, rounds = 0, tries = 0;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    pts.forEach(p => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); });
+    while (placed < N && tries < 20000) {
+      tries++;
+      const x = minX - 90 + R() * (maxX - minX + 180), z = minZ - 90 + R() * (maxZ - minZ + 180);
+      let d = Infinity;
+      for (let i = 0; i < count; i += 3) d = Math.min(d, (pts[i].x - x) ** 2 + (pts[i].z - z) ** 2);
+      if (d < (wall + 5) ** 2) continue;
+      const s = 0.8 + R() * 0.7;
+      ps.set(x, 1.5 * s, z); sc.set(s, s, s); q.identity();
+      m.compose(ps, q, sc); trunk.setMatrixAt(placed, m);
+      const c = greens[Math.floor(R() * greens.length)];
+      if (R() < 0.5) {
+        ps.set(x, 7 * s, z); m.compose(ps, q, sc); cone.setMatrixAt(cones, m); cone.setColorAt(cones, c); cones++;
+      } else {
+        ps.set(x, 5.3 * s, z); q.setFromEuler(new THREE.Euler(R(), R(), R())); m.compose(ps, q, sc);
+        crown.setMatrixAt(rounds, m); crown.setColorAt(rounds, c); rounds++;
+      }
+      placed++;
+    }
+    trunk.count = placed; cone.count = cones; crown.count = rounds;
+    scene.add(trunk, cone, crown);
+  }
+
+  // colline e nuvole in lontananza
+  {
+    const hillMat = new THREE.MeshLambertMaterial({ color: '#4c9a52', flatShading: true });
+    const far = new THREE.MeshLambertMaterial({ color: '#7fae9a', flatShading: true });
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2 + R() * 0.2, r = 560 + R() * 220;
+      const h = new THREE.Mesh(new THREE.SphereGeometry(80 + R() * 90, 9, 6), i % 2 ? hillMat : far);
+      h.scale.y = 0.45 + R() * 0.35;
+      h.position.set(cx + Math.cos(a) * r, -10, cz + Math.sin(a) * r);
+      scene.add(h);
+    }
+    const cloudMat = new THREE.MeshLambertMaterial({ color: '#ffffff', emissive: '#c9e6ff', emissiveIntensity: 0.35, fog: false });
+    for (let i = 0; i < 14; i++) {
+      const g = new THREE.Group();
+      for (let k = 0; k < 4; k++) {
+        const s = new THREE.Mesh(new THREE.SphereGeometry(14 + R() * 10, 8, 6), cloudMat);
+        s.position.set(k * 16 - 24, R() * 6, R() * 10);
+        s.scale.y = 0.65;
+        g.add(s);
+      }
+      const a = R() * Math.PI * 2, r = 300 + R() * 600;
+      g.position.set(cx + Math.cos(a) * r, 140 + R() * 90, cz + Math.sin(a) * r);
+      g.rotation.y = R() * 3;
+      scene.add(g);
+    }
+  }
+
+  // bandierine lungo il rettilineo di partenza
+  {
+    const cols = ['#e8322b', '#ffd400', '#2f6fe0', '#2ec46b'];
+    for (let i = -12; i <= 12; i += 2) {
+      const p = pts[(i * 4 + count) % count];
+      for (const side of [-1, 1]) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 6, 5), new THREE.MeshLambertMaterial({ color: '#dddddd' }));
+        const x = p.x + p.rx * side * (wall + 2), z = p.z + p.rz * side * (wall + 2);
+        pole.position.set(x, 3, z);
+        const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.4), new THREE.MeshLambertMaterial({ color: cols[(i / 2 + 12) % 4], side: THREE.DoubleSide }));
+        flag.position.set(x + p.tx * 1.1, 5.2, z + p.tz * 1.1);
+        flag.rotation.y = Math.atan2(p.tx, p.tz) + Math.PI / 2;
+        scene.add(pole, flag);
+      }
+    }
+  }
+}
+
+// ------------------------------------------------------------------ parti comuni a tutte le piste: via, griglia, portali-carta, pit stop
+function buildCommon(scene, track) {
+  const { pts, count, halfWidth: hw } = track;
   // traguardo a scacchi + portale
   {
     const p0 = pts[0];
@@ -253,68 +334,8 @@ function buildWorld(scene, track) {
     }
   }
 
-  // alberi (istanziati)
-  {
-    const N = 360;
-    const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.7, 3, 6), new THREE.MeshLambertMaterial({ color: '#8a5a33' }), N);
-    const crown = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(3.4, 0), new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), N);
-    const cone = new THREE.InstancedMesh(new THREE.ConeGeometry(3, 8, 7), new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), N);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
-    const greens = ['#2f9e44', '#3fb553', '#278c3a', '#57c25e', '#1f7a33'].map(c => new THREE.Color(c));
-    let placed = 0, cones = 0, rounds = 0, tries = 0;
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    pts.forEach(p => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); });
-    while (placed < N && tries < 20000) {
-      tries++;
-      const x = minX - 90 + R() * (maxX - minX + 180), z = minZ - 90 + R() * (maxZ - minZ + 180);
-      let d = Infinity;
-      for (let i = 0; i < count; i += 3) d = Math.min(d, (pts[i].x - x) ** 2 + (pts[i].z - z) ** 2);
-      if (d < (wall + 5) ** 2) continue;
-      const s = 0.8 + R() * 0.7;
-      ps.set(x, 1.5 * s, z); sc.set(s, s, s); q.identity();
-      m.compose(ps, q, sc); trunk.setMatrixAt(placed, m);
-      const c = greens[Math.floor(R() * greens.length)];
-      if (R() < 0.5) {
-        ps.set(x, 7 * s, z); m.compose(ps, q, sc); cone.setMatrixAt(cones, m); cone.setColorAt(cones, c); cones++;
-      } else {
-        ps.set(x, 5.3 * s, z); q.setFromEuler(new THREE.Euler(R(), R(), R())); m.compose(ps, q, sc);
-        crown.setMatrixAt(rounds, m); crown.setColorAt(rounds, c); rounds++;
-      }
-      placed++;
-    }
-    trunk.count = placed; cone.count = cones; crown.count = rounds;
-    scene.add(trunk, cone, crown);
-  }
-
-  // colline e nuvole in lontananza
-  {
-    const hillMat = new THREE.MeshLambertMaterial({ color: '#4c9a52', flatShading: true });
-    const far = new THREE.MeshLambertMaterial({ color: '#7fae9a', flatShading: true });
-    for (let i = 0; i < 18; i++) {
-      const a = (i / 18) * Math.PI * 2 + R() * 0.2, r = 560 + R() * 220;
-      const h = new THREE.Mesh(new THREE.SphereGeometry(80 + R() * 90, 9, 6), i % 2 ? hillMat : far);
-      h.scale.y = 0.45 + R() * 0.35;
-      h.position.set(cx + Math.cos(a) * r, -10, cz + Math.sin(a) * r);
-      scene.add(h);
-    }
-    const cloudMat = new THREE.MeshLambertMaterial({ color: '#ffffff', emissive: '#c9e6ff', emissiveIntensity: 0.35, fog: false });
-    for (let i = 0; i < 14; i++) {
-      const g = new THREE.Group();
-      for (let k = 0; k < 4; k++) {
-        const s = new THREE.Mesh(new THREE.SphereGeometry(14 + R() * 10, 8, 6), cloudMat);
-        s.position.set(k * 16 - 24, R() * 6, R() * 10);
-        s.scale.y = 0.65;
-        g.add(s);
-      }
-      const a = R() * Math.PI * 2, r = 300 + R() * 600;
-      g.position.set(cx + Math.cos(a) * r, 140 + R() * 90, cz + Math.sin(a) * r);
-      g.rotation.y = R() * 3;
-      scene.add(g);
-    }
-  }
-
   // portali-carta: archi luminosi con una carta che gira
-  track.portalMeshes = PORTAL_FRACTIONS.map((f) => {
+  track.portalMeshes = track.portalFractions.map((f) => {
     const p = pts[Math.floor((f * track.length) / track.ds) % count];
     const g = new THREE.Group();
     const glow = new THREE.MeshBasicMaterial({ color: '#ffd400' });
@@ -329,7 +350,7 @@ function buildWorld(scene, track) {
     const card = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 3.3), new THREE.MeshBasicMaterial({ map: cardTex, side: THREE.DoubleSide, transparent: true }));
     card.position.y = hw - 1.2;
     g.add(card);
-    g.position.set(p.x, 0, p.z);
+    g.position.set(p.x, groundHeight(track, f * track.length, 0), p.z);
     g.rotation.y = Math.atan2(p.tx, p.tz);
     scene.add(g);
     return { g, arch, card, glow };
@@ -337,7 +358,7 @@ function buildWorld(scene, track) {
 
   // pit stop: portale a scacchi con l'insegna
   {
-    const p = pts[Math.floor((PIT_FRACTION * track.length) / track.ds) % count];
+    const p = pts[Math.floor((track.pitFraction * track.length) / track.ds) % count];
     const g = new THREE.Group();
     const postMat = new THREE.MeshLambertMaterial({ color: '#2b2f45' });
     for (const side of [-1, 1]) {
@@ -359,27 +380,17 @@ function buildWorld(scene, track) {
       [postMat, postMat, postMat, postMat, new THREE.MeshLambertMaterial({ map: sign }), new THREE.MeshLambertMaterial({ map: sign })]);
     board.position.set(0, 7, 0);
     g.add(board);
-    g.position.set(p.x, 0, p.z);
+    g.position.set(p.x, groundHeight(track, track.pitFraction * track.length, 0), p.z);
     g.rotation.y = Math.atan2(p.tx, p.tz);
     scene.add(g);
   }
 
-  // bandierine lungo il rettilineo di partenza
-  {
-    const cols = ['#e8322b', '#ffd400', '#2f6fe0', '#2ec46b'];
-    for (let i = -12; i <= 12; i += 2) {
-      const p = pts[(i * 4 + count) % count];
-      for (const side of [-1, 1]) {
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 6, 5), new THREE.MeshLambertMaterial({ color: '#dddddd' }));
-        const x = p.x + p.rx * side * (wall + 2), z = p.z + p.rz * side * (wall + 2);
-        pole.position.set(x, 3, z);
-        const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.4), new THREE.MeshLambertMaterial({ color: cols[(i / 2 + 12) % 4], side: THREE.DoubleSide }));
-        flag.position.set(x + p.tx * 1.1, 5.2, z + p.tz * 1.1);
-        flag.rotation.y = Math.atan2(p.tx, p.tz) + Math.PI / 2;
-        scene.add(pole, flag);
-      }
-    }
-  }
+}
+
+function buildWorld(root, track) {
+  if (track.id === 'mancave') buildMancave(root, track, canvasTex);
+  else buildProva(root, track);
+  buildCommon(root, track);
 }
 
 // ------------------------------------------------------------------ kart
@@ -492,7 +503,27 @@ export function createRenderer(canvas, hudRoot, track) {
   }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   const scene = new THREE.Scene();
-  buildWorld(scene, track);
+  let world = new THREE.Group();
+  buildWorld(world, track);
+  scene.add(world);
+  scene.fog = world.userData.fog || null;
+  // cambio pista: butto via il mondo vecchio e costruisco il nuovo
+  function setTrack(t) {
+    scene.remove(world);
+    world.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+      for (const m of mats) { if (m.map) m.map.dispose(); m.dispose(); }
+    });
+    track = t;
+    world = new THREE.Group();
+    buildWorld(world, track);
+    scene.add(world);
+    scene.fog = world.userData.fog || null;
+    bounds = computeBounds();
+    views.forEach(v => { v.mapBase = null; v.init = false; v.init2 = false; });
+    for (const kind of Object.keys(pool)) { for (const m of pool[kind].values()) scene.remove(m); pool[kind].clear(); }
+  }
 
   const karts = new Map();
   let layout = [];        // [{slot}] per riquadro
@@ -501,11 +532,12 @@ export function createRenderer(canvas, hudRoot, track) {
   let lastSig = '';
 
   // minimappa: percorso disegnato una volta
-  const bounds = (() => {
+  function computeBounds() {
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     track.pts.forEach(p => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); });
     return { minX, maxX, minZ, maxZ };
-  })();
+  }
+  let bounds = computeBounds();
   function mapXY(x, z, size) {
     const span = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) * 1.12;
     const ox = (bounds.minX + bounds.maxX) / 2, oz = (bounds.minZ + bounds.maxZ) / 2;
@@ -523,8 +555,10 @@ export function createRenderer(canvas, hudRoot, track) {
     g.strokeStyle = 'rgba(70,78,98,0.95)'; g.lineWidth = size * 0.045; g.stroke();
     const p0 = track.pts[0]; const [sx, sy] = mapXY(p0.x, p0.z, size);
     g.fillStyle = '#fff'; g.fillRect(sx - size * 0.03, sy - size * 0.012, size * 0.06, size * 0.024);
-    const pr = track.pts[Math.floor(track.rampStartS / track.ds)]; const [rx, ry] = mapXY(pr.x, pr.z, size);
-    g.fillStyle = '#ffcc00'; g.beginPath(); g.arc(rx, ry, size * 0.022, 0, 7); g.fill();
+    if (track.rampStartS >= 0) {
+      const pr = track.pts[Math.floor(track.rampStartS / track.ds)]; const [rx, ry] = mapXY(pr.x, pr.z, size);
+      g.fillStyle = '#ffcc00'; g.beginPath(); g.arc(rx, ry, size * 0.022, 0, 7); g.fill();
+    }
     return c;
   }
 
@@ -674,7 +708,7 @@ export function createRenderer(canvas, hudRoot, track) {
   function drawMeters(v, snap, k) {
     const L = track.length;
     let best = Infinity, lit = true;
-    PORTAL_FRACTIONS.forEach((f, i) => {
+    track.portalFractions.forEach((f, i) => {
       const d = (f * L - k.s + L) % L;
       if (d < best) { best = d; lit = !snap.portals || snap.portals[i] !== false; }
     });
@@ -775,6 +809,15 @@ export function createRenderer(canvas, hudRoot, track) {
       });
     }
     for (const [slot, m] of karts) if (!present.has(slot)) { scene.remove(m.root, m.shadow); karts.delete(slot); }
+    // aspirapolvere e gatto
+    if (track.obstacleMeshes) {
+      const obs = obstaclesAt(track, snap.raceTime || tsec);
+      for (const [kind, mesh] of Object.entries(track.obstacleMeshes)) {
+        const o = obs.find(q => q.kind === kind);
+        mesh.visible = !!o;
+        if (o) { mesh.position.set(o.x, o.y, o.z); mesh.rotation.y = o.yaw + (kind === 'vacuum' ? tsec * 2 : 0); }
+      }
+    }
 
     // portali: accesi se si può pescare
     (track.portalMeshes || []).forEach((pm, i) => {
@@ -827,17 +870,22 @@ export function createRenderer(canvas, hudRoot, track) {
         v.yaw += d * Math.min(1, dt * 5.5);
         const cx = Math.sin(v.yaw), cz = Math.cos(v.yaw);
         const back = snap.phase === 'finish' && k.finished ? 9 : 7.2;
-        const camY = k.y * 0.7 + 3.1;
+        // la telecamera segue l'altezza del kart (mobili, salti) senza scatti
+        if (v.camY == null || !v.init2) { v.camY = k.y; v.init2 = true; }
+        v.camY += (k.y - v.camY) * Math.min(1, dt * (k.y > v.camY ? 8 : 4));
+        const camY = v.camY + 3.1;
         v.cam.position.set(k.x - cx * back, camY, k.z - cz * back);
         // Sbronzo: la visuale ondeggia
         const wob = k.drunkT > 0 ? Math.min(1, k.drunkT) : 0;
         v.cam.up.set(Math.sin(tsec * 2.6) * 0.16 * wob * cz, 1, -Math.sin(tsec * 2.6) * 0.16 * wob * cx);
-        v.cam.lookAt(k.x + fx * 3.5 + Math.sin(tsec * 1.9) * 1.2 * wob, k.y * 0.85 + 1.6, k.z + fz * 3.5 + Math.cos(tsec * 1.7) * 1.2 * wob);
+        v.cam.lookAt(k.x + fx * 3.5 + Math.sin(tsec * 1.9) * 1.2 * wob, v.camY + (k.y - v.camY) * 0.5 + 1.6, k.z + fz * 3.5 + Math.cos(tsec * 1.7) * 1.2 * wob);
         const target = k.boostT > 0 ? 84 : 72;
         v.fov += (target - v.fov) * Math.min(1, dt * 4);
         v.cam.fov = v.fov;
       }
       v.cam.updateProjectionMatrix();
+      // le etichette dei nomi troppo vicine alla telecamera coprirebbero tutto: le nascondo
+      for (const m of karts.values()) m.tag.visible = m.root.position.distanceTo(v.cam.position) > 11;
       renderer.setViewport(x, H - y - h, w, h);
       renderer.setScissor(x, H - y - h, w, h);
       renderer.render(scene, v.cam);
@@ -931,7 +979,7 @@ export function createRenderer(canvas, hudRoot, track) {
       const g = v.map.getContext('2d');
       g.clearRect(0, 0, ms, ms);
       if (v.mapBase) g.drawImage(v.mapBase, 0, 0);
-      PORTAL_FRACTIONS.forEach((f, i) => {
+      track.portalFractions.forEach((f, i) => {
         const p = track.pts[Math.floor((f * track.length) / track.ds) % track.count];
         const [px, py] = mapXY(p.x, p.z, ms);
         const on = !snap.portals || snap.portals[i] !== false;
@@ -940,7 +988,7 @@ export function createRenderer(canvas, hudRoot, track) {
         g.lineWidth = 2; g.strokeStyle = '#1a1a1a'; g.stroke();
       });
       {
-        const p = track.pts[Math.floor((PIT_FRACTION * track.length) / track.ds) % track.count];
+        const p = track.pts[Math.floor((track.pitFraction * track.length) / track.ds) % track.count];
         const [px, py] = mapXY(p.x, p.z, ms);
         const r = ms * 0.03;
         g.fillStyle = '#fff'; g.fillRect(px - r, py - r, r * 2, r * 2);
@@ -961,7 +1009,7 @@ export function createRenderer(canvas, hudRoot, track) {
   let onEvent = () => {};
   let mirrorOn = true;
   return {
-    render, renderer, perf, quality: () => STEPS[prStep],
+    render, renderer, perf, quality: () => STEPS[prStep], setTrack,
     onEvent: (fn) => { onEvent = fn; }, setMirror: (on) => { mirrorOn = on; },
   };
 }

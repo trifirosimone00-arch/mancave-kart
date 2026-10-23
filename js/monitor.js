@@ -13,7 +13,7 @@ const code = (params.get('r') || '').toUpperCase();
 const remote = params.get('remote') === '1';
 const m = Number(params.get('m') || 1);
 
-const track = buildTrack();
+let track = buildTrack();
 const view = createRenderer($('game'), $('hud'), track);
 const key = remote ? 'mck-screen-remote' : 'mck-screen-mon-' + m;
 const screen = createScreenConfig(key);
@@ -149,6 +149,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   const s = remote ? interpolated(now) : snap;
+  if (s.trackId && s.trackId !== track.id) { track = buildTrack(s.trackId); view.setTrack(track); }
   const alive = now - lastMsg < 3000;
   $('waiting').classList.toggle('hidden', alive && s.phase !== 'lobby');
   if (alive) setWait(s.phase === 'lobby' ? 'Collegato! La gara compare qui appena parte.' : '');

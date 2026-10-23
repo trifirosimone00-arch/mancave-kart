@@ -1,6 +1,6 @@
 // Fisica arcade dei kart, stile Mario Kart: accelerazione automatica,
 // derapata con mini-turbo, turbo alla partenza, salto con acrobazia.
-import { locate, groundHeight } from './track.js';
+import { locate, groundHeight, zoneAt } from './track.js';
 
 export const MAX_SPEED = 30;          // ~108 km/h nel tachimetro (x3.6)
 const ACCEL = 15;
@@ -130,6 +130,7 @@ export function stepKart(track, k, input, dt, phase) {
     turn = steer * (2.0 - 0.6 * Math.min(1, Math.abs(k.speed) / MAX_SPEED));
   }
   if (k.air) turn *= 0.25;
+  if (k.ice) turn *= 0.6;                        // nel frigo si scivola
   if (k.speed < 0) turn = -turn;
   k.yaw -= turn * speedF * dt;
 
@@ -163,6 +164,12 @@ function move(track, k, dt, fx, fz) {
     vx -= rx * k.driftDir * k.speed * 0.16;
     vz -= rz * k.driftDir * k.speed * 0.16;
   }
+  // ghiaccio: la direzione del kart cambia più lentamente (scivola)
+  if (k.ice && !k.air) {
+    const a = Math.min(1, dt * 2.2);
+    vx = (k.pvx ?? vx) + (vx - (k.pvx ?? vx)) * a; vz = (k.pvz ?? vz) + (vz - (k.pvz ?? vz)) * a;
+  }
+  k.pvx = vx; k.pvz = vz;
   // spallata: spinta di lato che si esaurisce in fretta (la velocità in avanti non cambia)
   vx += k.shX || 0; vz += k.shZ || 0;
   const f = Math.exp(-7 * dt);
@@ -173,9 +180,22 @@ function move(track, k, dt, fx, fz) {
   const loc = locate(track, k.x, k.z, k.idx);
   k.prevS = k.s; k.idx = loc.idx; k.s = loc.s; k.lat = loc.lat;
 
+  const zone = zoneAt(track, k.s);
+  k.ice = zone === 'fridge';
+  // tavolo senza bordi: se esci, cadi e ti rimettono in pista (perdi qualche secondo)
+  if (zone === 'table') {
+    if (Math.abs(k.lat) > track.halfWidth + 3.5) {
+      placeAt(track, k, k.s - 6, 0);
+      k.y = groundHeight(track, k.s, 0); k.air = false; k.vy = 0;
+      k.speed = 0; k.stopT = Math.max(k.stopT || 0, 1.3); k.shX = k.shZ = 0; k.pvx = k.pvz = undefined;
+      k.drifting = false; k.driftDir = 0; k.driftCharge = 0;
+      k.events.push('fall');
+      return;
+    }
+  }
   // muretto
   const lim = track.wall - 1.3;
-  if (Math.abs(k.lat) > lim) {
+  if (zone !== 'table' && Math.abs(k.lat) > lim) {
     const p = track.pts[k.idx];
     const push = (Math.abs(k.lat) - lim) * Math.sign(k.lat);
     k.x -= p.rx * push; k.z -= p.rz * push; k.lat -= push;

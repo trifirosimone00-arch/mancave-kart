@@ -345,7 +345,7 @@ export function kgStep(ka, ks, dt) {
       }
       // dopo 25 secondi crollano anche piastrelle a caso, così finisce
       if (ka.t > 20 && rr(ka) < dt * (0.8 + (ka.t - 20) * 0.08)) { const ti = Math.floor(rr(ka) * ka.tl.length); if (ka.tl[ti] === 0) ka.tl[ti] = ka.t; }
-      for (let i = 0; i < ka.tl.length; i++) if (ka.tl[i] > 0 && ka.t - ka.tl[i] > 1.4) ka.tl[i] = -1;
+      for (let i = 0; i < ka.tl.length; i++) if (ka.tl[i] > 0 && ka.t - ka.tl[i] > 2) ka.tl[i] = -1;
       if (alive.length <= 1 && ks.length > 1) ka.over = true;
       break;
     }
@@ -555,13 +555,15 @@ export function kgCpu(ka, k, others, brain) {
     }
     case 'aspirapolvere': flee = ka.vac; break;
     case 'pavimento': {
+      // buco o crepa davanti: cambio strada subito
+      for (const dd of [4, 8]) { const ax = k.x + Math.sin(k.yaw) * dd, az = k.z + Math.cos(k.yaw) * dd; if (tileState(ka, ax, az) !== 0) { brain.next = 0; break; } }
       if (!brain.pt || brain.t > brain.next || tileState(ka, brain.pt.x, brain.pt.z) !== 0 || d2(k, brain.pt) < 6) {
         let best = null, bs = -Infinity;
-        for (let n = 0; n < 24; n++) {
+        for (let n = 0; n < 40; n++) {
           const p = { x: OX + (Math.random() * 2 - 1) * (HW - 6), z: OZ + (Math.random() * 2 - 1) * (HD - 6) };
           if (tileState(ka, p.x, p.z) !== 0) continue;
           let sc = -Math.abs(d2(k, p) - 16);
-          for (let s = 1; s <= 4; s++) { const q = { x: k.x + (p.x - k.x) * s / 4, z: k.z + (p.z - k.z) * s / 4 }; const ts = tileState(ka, q.x, q.z); if (ts < 0) sc -= 40; else if (ts > 0) sc -= 12; }
+          for (let s = 1; s <= 6; s++) { const q = { x: k.x + (p.x - k.x) * s / 6, z: k.z + (p.z - k.z) * s / 6 }; const ts = tileState(ka, q.x, q.z); if (ts < 0) sc -= 40; else if (ts > 0) sc -= 12; }
           if (sc > bs) { bs = sc; best = p; }
         }
         brain.pt = best || { x: OX, z: OZ }; brain.next = brain.t + 0.8;

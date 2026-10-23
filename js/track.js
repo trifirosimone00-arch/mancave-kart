@@ -7,6 +7,7 @@ export const TRACK_LIST = [
   { id: 'prova', name: 'Pista di prova' },
   { id: 'mancave', name: 'La Mancave' },
   { id: 'mall', name: 'Centro commerciale' },
+  { id: 'hot', name: 'Pista Hot Wheels' },
 ];
 const PORTALS_PROVA = [0.18, 0.47, 0.76];
 const PIT_PROVA = 0.56;
@@ -37,6 +38,7 @@ export function buildTrack(id = 'prova', step = 1.5) {
   if (typeof id === 'number') { step = id; id = 'prova'; }
   if (id === 'mancave') return buildMancave(step);
   if (id === 'mall') return buildMall(step);
+  if (id === 'hot') return buildHot(step);
   const n = CONTROL.length;
   const C = CONTROL.map(([x, z]) => [x * SCALE, z * SCALE]);
   const dense = [];
@@ -189,13 +191,81 @@ function buildCtrl(CTRL, step) {
     zone[i] = A[3];
     // piccole onde sui cuscini del divano
   }
+  // nel buco dopo il trampolino non c'è pavimento: si cade di sotto
+  for (let i = 0; i < count; i++) if (zone[i] === 'gap') hs[i] = -60;
   for (let i = 1; i < count; i++) if (hs[i] < hs[i - 1] - 3) step0[i] = 1;
   // punti notevoli (come distanza dal via)
   const sAt = (cpIdx, frac = 0) => { let best = 0, bd = Infinity; for (let i = 0; i < count; i++) { const d = Math.abs(pts[i].cp - (cpIdx + frac)); if (d < bd) { bd = d; best = i; } } return pts[best].s; };
   const sNear = (x, z) => { let best = 0, bd = Infinity; for (let i = 0; i < count; i++) { const d = (pts[i].x - x) ** 2 + (pts[i].z - z) ** 2; if (d < bd) { bd = d; best = i; } } return pts[best].s; };
+  // curve sopraelevate (zona 'bank'): il lato esterno della curva è più alto (pendenza per unità di lato)
+  let bank = null;
+  if (zone.includes('bank')) {
+    const raw = new Float32Array(count);
+    const K = 6;
+    for (let i = 0; i < count; i++) {
+      if (zone[i] !== 'bank') continue;
+      const a = pts[(i - K + count) % count], b = pts[(i + K) % count], p = pts[i];
+      // verso il centro della curva: da che parte gira la strada
+      const cx = b.tx - a.tx, cz = b.tz - a.tz, mag = Math.hypot(cx, cz);
+      const side = cx * p.rx + cz * p.rz;                 // > 0: il centro è a destra
+      raw[i] = -Math.sign(side) * Math.min(0.42, mag * 0.9);
+    }
+    bank = new Float32Array(count);
+    const W = 14;
+    for (let i = 0; i < count; i++) { let sm = 0; for (let k = -W; k <= W; k++) sm += raw[(i + k + count) % count]; bank[i] = sm / (2 * W + 1); }
+  }
+  // giri della morte (zona 'loop'): un rettilineo "virtuale" che si vede come un anello verticale
+  const loops = [];
+  for (let i = 0; i < count; i++) {
+    if (zone[i] === 'loop' && zone[(i - 1 + count) % count] !== 'loop') {
+      let j = i; while (zone[(j + 1) % count] === 'loop') j++;
+      const a = pts[i], b = pts[j % count], L = Math.hypot(b.x - a.x, b.z - a.z);
+      loops.push({ i0: i, i1: j, s0: a.s, s1: pts[j % count].s + ds, fx: (b.x - a.x) / L, fz: (b.z - a.z) / L, R: L / (1.6 * Math.PI) });
+    }
+  }
   return {
     sNear, sAt, length,
-    track: { pts, count, length, ds, hs, zone, step: step0, rampStartS: -1e9, rampEndS: -1e9, halfWidth: 8.5, wall: 13.5 },
+    track: { pts, count, length, ds, hs, zone, step: step0, bank, loops, rampStartS: -1e9, rampEndS: -1e9, halfWidth: 8.5, wall: 13.5 },
+  };
+}
+
+// dove si vede davvero un kart che è nel giro della morte: { x, y, z, pitch } (o null fuori dal giro)
+// avanti: f(u) = R·sin(2πu) in più del rettilineo, su: R·(1 − cos 2πu); in cima si è a testa in giù
+export function loopPose(track, s, x, y, z) {
+  if (!track.loops || !track.loops.length) return null;
+  for (const L of track.loops) {
+    if (s < L.s0 || s > L.s1) continue;
+    const len = L.s1 - L.s0, u = (s - L.s0) / len, w = 2 * Math.PI * u;
+    const f = L.R * Math.sin(w), h = L.R * (1 - Math.cos(w));
+    // pendenza: derivate rispetto a u
+    const df = len + L.R * 2 * Math.PI * Math.cos(w), dh = L.R * 2 * Math.PI * Math.sin(w);
+    return { x: x + L.fx * f, y: y + h, z: z + L.fz * f, pitch: Math.atan2(dh, df), u, L };
+  }
+  return null;
+}
+
+// ------------------------------------------------------------------ Pista Hot Wheels: pista arancione sospesa in una cameretta
+// zone: track (pista normale), bank (curva sopraelevata), boost (spinta turbo), loop (giro della morte),
+// ramp (trampolino che sale), gap (il buco dopo il salto: se ci arrivi piano, cadi)
+const HOT = [
+  [-110, -150, 8, 'track'], [-20, -152, 8, 'boost'], [60, -150, 8, 'track'],
+  [130, -135, 9, 'bank'], [170, -90, 11, 'bank'], [178, -30, 14, 'track'],
+  [165, 25, 20, 'track'], [140, 62, 26, 'track'],
+  [110, 74, 26, 'loop'], [38, 94, 26, 'track'], [8, 102, 26, 'track'],
+  [-25, 108, 26, 'ramp'], [-48, 110, 33, 'ramp'], [-58, 110, 14, 'gap', true], [-82, 107, 14, 'track'], [-104, 100, 14, 'track'],
+  [-130, 88, 14, 'bank'], [-160, 48, 13, 'bank'], [-150, 5, 12, 'track'],
+  [-110, -15, 12, 'track'], [-62, 0, 14, 'boost'], [-18, 20, 16, 'track'],
+  [24, 2, 16, 'bank'], [30, -45, 14, 'bank'], [-5, -80, 12, 'track'],
+  [-60, -96, 10, 'track'], [-128, -108, 9, 'bank'], [-168, -138, 8, 'bank'], [-148, -156, 8, 'track'],
+];
+function buildHot(step) {
+  const t = buildCtrl(HOT, step);
+  const { sNear, length } = t;
+  return {
+    ...t.track, id: 'hot', name: 'Pista Hot Wheels',
+    portalFractions: [sNear(175, -60) / length, sNear(-150, 20) / length, sNear(10, 15) / length],
+    pitFraction: sNear(160, 30) / length,
+    marks: {},
   };
 }
 
@@ -274,8 +344,9 @@ export function groundHeight(track, s, lat) {
     const L = track.length;
     s = ((s % L) + L) % L;
     const f = s / track.ds, i = Math.floor(f) % track.count, i2 = (i + 1) % track.count;
-    if (track.step[i2]) return track.hs[i];
-    return track.hs[i] + (track.hs[i2] - track.hs[i]) * (f - Math.floor(f));
+    const bk = track.bank ? track.bank[i] * Math.max(-track.wall, Math.min(track.wall, lat)) : 0;
+    if (track.step[i2]) return track.hs[i] + bk;
+    return track.hs[i] + (track.hs[i2] - track.hs[i]) * (f - Math.floor(f)) + bk;
   }
   if (Math.abs(lat) > track.halfWidth + 0.5) return 0;
   const d = s - track.rampStartS;

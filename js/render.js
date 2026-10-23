@@ -1,10 +1,11 @@
 // Grafica 3D: pista di prova, kart, telecamere per riquadro, HUD stile Wii.
 import * as THREE from 'three';
-import { groundHeight, RAMP_LENGTH, obstaclesAt, locate, solidAt } from './track.js';
+import { groundHeight, RAMP_LENGTH, obstaclesAt, locate, solidAt, loopPose } from './track.js';
 import { MT_BLUE, MT_ORANGE, MAX_SPEED } from './sim.js';
 import { LAMPO, LAMPO_MAX } from './minigames.js';
 import { buildMancave } from './render-mancave.js';
 import { buildMall } from './render-mall.js';
+import { buildHot } from './render-hot.js';
 import { buildKartModel } from './kart-model.js';
 import { createCardFx } from './card-fx.js';
 import { createArenaView } from './arena-render.js';
@@ -402,6 +403,7 @@ function buildCommon(scene, track) {
 function buildWorld(root, track, night = false) {
   if (track.id === 'mancave') buildMancave(root, track, { night });
   else if (track.id === 'mall') buildMall(root, track, { night });
+  else if (track.id === 'hot') buildHot(root, track, { night });
   else buildProva(root, track, night);
   buildCommon(root, track);
 }
@@ -885,6 +887,14 @@ export function createRenderer(canvas, hudRoot, track) {
       present.add(k.slot);
       const m = ensureKart(k);
       m.root.position.set(k.x, k.y + (k.hop > 0 ? Math.sin((k.hop / 0.18) * Math.PI) * 0.5 : 0), k.z);
+      // giro della morte (pista Hot Wheels): il kart si vede sull'anello, girato col muso verso l'alto
+      const lpk = !arenaOn && track.loops && track.loops.length ? loopPose(track, k.s, k.x, k.y, k.z) : null;
+      m.root.rotation.order = 'YXZ';
+      if (lpk) { m.root.position.set(lpk.x, lpk.y, lpk.z); m.root.rotation.x = -lpk.pitch; } else m.root.rotation.x = 0;
+      // curve sopraelevate: il kart si inclina con la pista
+      const bki = track.bank && !arenaOn ? track.bank[Math.floor(((k.s % track.length) + track.length) % track.length / track.ds) % track.count] : 0;
+      m.root.rotation.z += ((bki ? Math.atan(bki) : 0) - m.root.rotation.z) * Math.min(1, dt * 8);
+      m.loopPose = lpk;
       const driftAngle = k.drifting ? k.driftDir * -0.42 : 0;
       m.root.rotation.y = k.yaw;
       m.body.rotation.y += ((driftAngle) - m.body.rotation.y) * Math.min(1, dt * 10);
@@ -898,7 +908,7 @@ export function createRenderer(canvas, hudRoot, track) {
       // ombra
       const gnd = arenaOn ? 0 : Math.max(0, groundHeight(track, k.s, k.lat));
       m.shadow.position.set(k.x, gnd + 0.08, k.z);
-      m.shadow.visible = !arenaOn || k.y > -1;
+      m.shadow.visible = (!arenaOn || k.y > -1) && !lpk;
       m.shadow.rotation.z = k.yaw;
       const air = Math.max(0, k.y - gnd);
       m.shadow.material.opacity = Math.max(0.08, 0.28 - air * 0.03);
@@ -1011,8 +1021,18 @@ export function createRenderer(canvas, hudRoot, track) {
         const sCam = (L * 0.08 + u * L * 0.95) % L;
         const p = track.pts[Math.floor(sCam / track.ds) % track.count];
         const q = track.pts[Math.floor(((sCam + 45) % L) / track.ds) % track.count];
-        v.cam.position.set(p.x - p.rx * 30, 26, p.z - p.rz * 30);
-        v.cam.lookAt(q.x, 2, q.z);
+        const hp = track.hs ? track.hs[Math.floor(sCam / track.ds) % track.count] : 0, hq = track.hs ? track.hs[Math.floor(((sCam + 45) % L) / track.ds) % track.count] : 0;
+        v.cam.position.set(p.x - p.rx * 30, 26 + Math.max(0, hp), p.z - p.rz * 30);
+        v.cam.lookAt(q.x, 2 + Math.max(0, hq), q.z);
+        v.init = false;
+      } else if (karts.get(v.slot) && karts.get(v.slot).loopPose) {
+        // giro della morte: inquadratura da fuori, di lato all'anello
+        const lp = karts.get(v.slot).loopPose, L = lp.L, a = track.pts[L.i0];
+        const len = L.s1 - L.s0, cx = a.x + L.fx * len * 0.5, cz = a.z + L.fz * len * 0.5, cy = track.hs[L.i0] + L.R;
+        v.cam.position.set(cx - a.rx * L.R * 3.4 - L.fx * L.R * 0.8, cy + L.R * 0.4, cz - a.rz * L.R * 3.4 - L.fz * L.R * 0.8);
+        v.cam.up.set(0, 1, 0);
+        v.cam.lookAt(lp.x, lp.y, lp.z);
+        v.cam.fov = 62;
         v.init = false;
       } else {
         const fx = Math.sin(k.yaw), fz = Math.cos(k.yaw);
@@ -1066,7 +1086,7 @@ export function createRenderer(canvas, hudRoot, track) {
       if (k && k.drunkT > 0 && snap.phase === 'race') drunkPass(v, k, x, y, w, h, H, tsec);
 
       // ---- specchietto retrovisore (in alto al centro)
-      const showMirror = k && (snap.phase === 'race' || snap.phase === 'finish') && !k.finished && (mirrorOn === 'force' || (mirrorOn && prStep < STEPS.length - 1));
+      const showMirror = k && !(karts.get(v.slot) && karts.get(v.slot).loopPose) && (snap.phase === 'race' || snap.phase === 'finish') && !k.finished && (mirrorOn === 'force' || (mirrorOn && prStep < STEPS.length - 1));
       v.mirrorEl.style.display = showMirror ? 'block' : 'none';
       if (showMirror) {
         const mw = Math.round(w * 0.26), mh = Math.round(h * 0.12), mx = Math.round(x + (w - mw) / 2), my = Math.round(y + h * 0.025);

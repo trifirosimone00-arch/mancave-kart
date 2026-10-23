@@ -198,6 +198,9 @@ function move(track, k, dt, fx, fz) {
 
   const zone = zoneAt(track, k.s);
   k.ice = zone === 'spill';
+  // spinta turbo della pista Hot Wheels
+  if (k.zoneBoostCD > 0) k.zoneBoostCD -= dt;
+  if (zone === 'boost' && !(k.zoneBoostCD > 0) && !k.air) { giveBoost(k, 1.1, 'orange'); k.zoneBoostCD = 1.5; }
   // tavolo senza bordi: se esci, cadi e ti rimettono in pista (perdi qualche secondo)
   if (zone === 'table') {
     if (Math.abs(k.lat) > track.halfWidth + 3.5) {
@@ -246,6 +249,15 @@ function move(track, k, dt, fx, fz) {
     }
   }
 
+  // buco dopo il trampolino: se ci arrivi senza volare, cadi e ti rimettono prima del salto
+  if ((zone === 'gap' && !k.air) || k.y < -15) {
+    placeAt(track, k, k.s - 55, 0);
+    k.y = groundHeight(track, k.s, 0); k.air = false; k.vy = 0;
+    k.speed = 0; k.stopT = Math.max(k.stopT || 0, 1.3); k.shX = k.shZ = 0; k.pvx = k.pvz = undefined;
+    k.drifting = false; k.driftDir = 0; k.driftCharge = 0;
+    k.events.push('fall');
+    return;
+  }
   // giri: passaggio sul traguardo (s = 0)
   const L = track.length;
   if (k.prevS > L * 0.75 && k.s < L * 0.25) { k.lapCount++; k.events.push('lap'); }

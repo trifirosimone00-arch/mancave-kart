@@ -210,7 +210,7 @@ export function kgStep(ka, ks, dt) {
       if (a.speed > 7 && (f.x * dx + f.z * dz) / d > 0.45 && !stunned(a.slot)) {
         const key = a.slot + '>' + b.slot;
         if ((ka.cd[key] || 0) > ka.t || (ka.cd['inv' + b.slot] || 0) > ka.t) continue;
-        ka.cd['inv' + b.slot] = ka.t + 1.6;          // chi viene colpito è intoccabile per un attimo
+        ka.cd['inv' + b.slot] = ka.t + (ka.g === 'battaglia' ? 2.6 : 1.6);          // chi viene colpito è intoccabile per un attimo
         ka.cd[key] = ka.t + 1.1; ka.cd[b.slot + '>' + a.slot] = ka.t + 0.6;
         out.push([a, b]);
       }

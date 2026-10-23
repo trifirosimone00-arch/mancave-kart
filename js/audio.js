@@ -8,7 +8,7 @@ const store = {
 };
 
 export function createAudio() {
-  let ctx = null, master = null, sfxBus = null, musicBus = null, engineBus = null, noiseBuf = null, shaper = null;
+  let ctx = null, master = null, sfxBus = null, musicBus = null, voiceBus = null, engineBus = null, noiseBuf = null, shaper = null;
   let volume = store.get('volume', 0.7);
   const voices = new Map();      // slot -> voce del motore
   let tyre = null;
@@ -25,6 +25,7 @@ export function createAudio() {
     engineBus = ctx.createGain(); engineBus.gain.value = 0.9; engineBus.connect(comp);
     sfxBus = ctx.createGain(); sfxBus.gain.value = 0.55; sfxBus.connect(comp);
     musicBus = ctx.createGain(); musicBus.gain.value = 0.1; musicBus.connect(comp);
+    voiceBus = ctx.createGain(); voiceBus.gain.value = 1.0; voiceBus.connect(master);   // lo speaker passa sopra a tutto
     // rumore bianco riutilizzabile
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const d = noiseBuf.getChannelData(0);
@@ -172,6 +173,96 @@ export function createAudio() {
   };
   function play(name) { if (ctx && FX[name]) try { FX[name](); } catch (e) { /* niente */ } }
 
+  // ---------------------------------------------------------------- speaker (frasi registrate con una voce AI)
+  const VOICE_IDS = ['benvenuti', 'posti', 'tre', 'due', 'uno', 'via', 'giro2', 'giro3', 'giro4', 'giro5', 'ultimo', 'sorpasso', 'chesorpasso',
+    'leader', 'comando', 'missile', 'oil', 'drunk', 'invert', 'handbrake', 'mini', 'magnet', 'call', 'police', 'remote', 'swap', 'thief', 'mirror',
+    'shield', 'supershield', 'turbo', 'superturbo', 'pitstop', 'lampo', 'riparte', 'traguardo', 'vincitore', 'chegara',
+    'win-Robo-Rino', 'win-Turbo-Tina', 'win-Bot-Bruno', 'win-Chip-Carla'];
+  const vbuf = new Map();
+  let vLoading = false, vBusyUntil = 0, vLast = {};
+  let speakerOn = store.get('speaker', true);
+  function loadVoices() {
+    if (vLoading || !ctx) return;
+    vLoading = true;
+    for (const id of VOICE_IDS) {
+      fetch(`assets/voce/${id}.mp3`).then(r => r.arrayBuffer()).then(b => ctx.decodeAudioData(b)).then(buf => vbuf.set(id, buf)).catch(() => {});
+    }
+  }
+  // say: important = parla anche se sta già parlando (lo interrompe la prossima volta), cool = secondi prima di ripetere la stessa frase
+  function say(id, { important = false, cool = 4 } = {}) {
+    if (!ctx || !speakerOn || ctx.state !== 'running') return;
+    const b = vbuf.get(id);
+    if (!b) return;
+    const t = ctx.currentTime;
+    if (!important && t < vBusyUntil) return;
+    if (vLast[id] && t - vLast[id] < cool) return;
+    vLast[id] = t;
+    const src = ctx.createBufferSource(); src.buffer = b; src.connect(voiceBus); src.start();
+    vBusyUntil = t + b.duration + 0.15;
+    // la musica si abbassa mentre parla
+    musicBus.gain.setTargetAtTime(0.03, t, 0.05);
+    musicBus.gain.setTargetAtTime(musicLevel, t + b.duration, 0.3);
+  }
+  let musicLevel = 0.08;
+  const sp = { lastLeader: null, leaderAt: 0, lap: 0, lastLeadSay: 0, winSaid: false, cfx: new Set(), phase: '', count: 0, rt: 0 };
+  function speaker(snap) {
+    if (!vbuf.size) return;
+    const ph = snap.phase;
+    if (ph !== sp.phase) {
+      if (ph === 'intro') { say('benvenuti', { important: true }); sp.lap = 1; sp.lastLeader = null; sp.winSaid = false; }
+      if (ph === 'countdown') say('posti', { important: true });
+      if (ph === 'race' && sp.phase === 'countdown') say('via', { important: true, cool: 0 });
+      if (ph === 'pit') say(snap.pit && snap.pit.grid ? 'posti' : 'pitstop', { important: true });
+      if (ph === 'race' && sp.phase === 'pit') say('riparte', { important: true });
+      if (ph === 'podium') setTimeout(() => say('chegara', { important: true }), 1200);
+      sp.phase = ph;
+    }
+    if (ph === 'countdown') {
+      const n = Math.ceil(snap.countdown);
+      if (n !== sp.count && n >= 1 && n <= 3) say(['', 'uno', 'due', 'tre'][n], { important: true, cool: 0.5 });
+      sp.count = n;
+    }
+    if (ph !== 'race' && ph !== 'finish') return;
+    const ks = snap.karts || [];
+    if (!ks.length) return;
+    // giri: segue chi è in testa
+    const lead = ks.reduce((a, b) => (a.place <= b.place ? a : b));
+    const lap = Math.max(...ks.map(k => k.lapCount || 0));
+    if (lap > sp.lap && lap <= snap.laps) {
+      if (lap === snap.laps) say('ultimo', { important: true });
+      else if (lap >= 2 && lap <= 5) say('giro' + lap, { important: true });
+    }
+    sp.lap = Math.max(sp.lap, lap);
+    // minigioco lampo
+    if (snap.lampo && !sp.lampoOn) say('lampo', { important: true });
+    sp.lampoOn = !!snap.lampo;
+    // cambio in testa (non nei primi secondi, quando si sistema la griglia)
+    if (sp.lastLeader != null && lead.slot !== sp.lastLeader && (snap.raceTime || 0) > 6 && !lead.finished) {
+      const t = ctx.currentTime;
+      if (t - sp.lastLeadSay > 7) { say(Math.random() < 0.5 ? 'leader' : 'comando'); sp.lastLeadSay = t; }
+    }
+    sp.lastLeader = lead.slot;
+    // carte (le dice lo speaker, una alla volta)
+    for (const c of snap.cfx || []) {
+      if (sp.cfx.has(c.id)) continue;
+      sp.cfx.add(c.id);
+      if ((snap.raceTime || 0) - c.t > 1.2) continue;
+      if (c.kind === 'use' && c.card && c.card !== 'mirror' && c.card !== 'swap') say(c.card, { cool: 6 });
+      if (c.kind === 'swap') say('swap', { cool: 6 });
+      if (c.kind === 'mirror') say('mirror', { important: true, cool: 3 });
+      if (c.kind === 'boom' && Math.random() < 0.4) say('chesorpasso', { cool: 10 });
+    }
+    if (sp.cfx.size > 300) sp.cfx = new Set([...sp.cfx].slice(-80));
+    // arrivo: il primo che taglia il traguardo
+    const first = ks.filter(k => k.finished).sort((a, b) => a.finishTime - b.finishTime)[0];
+    if (first && !sp.winSaid) {
+      sp.winSaid = true;
+      say('traguardo', { important: true });
+      setTimeout(() => say(vbuf.has('win-' + first.name) ? 'win-' + first.name : 'vincitore', { important: true, cool: 0 }), 1100);
+    }
+  }
+  function setSpeaker(on) { speakerOn = !!on; store.set('speaker', speakerOn); }
+
   // ---------------------------------------------------------------- musica: semplice, allegra e chiara
   // una sola melodia ben riconoscibile + basso morbido, in Do maggiore (Do - La- - Fa - Sol), 132 bpm
   const BPM = 132, STEP = 60 / BPM / 2;               // ottavi
@@ -208,7 +299,10 @@ export function createAudio() {
     updateEngines(snap, me, dt);
     const musicOn = ['intro', 'countdown', 'race', 'pit', 'finish', 'podium'].includes(snap.phase);
     if (musicOn) startMusic(); else stopMusic();
-    musicBus.gain.setTargetAtTime(snap.phase === 'pit' || snap.phase === 'podium' ? 0.14 : 0.08, ctx.currentTime, 0.3);
+    musicLevel = snap.phase === 'pit' || snap.phase === 'podium' ? 0.14 : 0.08;
+    if (ctx.currentTime > vBusyUntil) musicBus.gain.setTargetAtTime(musicLevel, ctx.currentTime, 0.3);
+    loadVoices();
+    try { speaker(snap); } catch (e) { /* niente */ }
     // conto alla rovescia
     if (snap.phase === 'countdown') {
       const n = Math.ceil(snap.countdown);
@@ -230,5 +324,5 @@ export function createAudio() {
     if (lastNotes.size > 200) lastNotes = new Set([...lastNotes].slice(-50));
   }
 
-  return { update, play, setVolume, volume: () => volume };
+  return { update, play, setVolume, volume: () => volume, setSpeaker, speaker: () => speakerOn };
 }

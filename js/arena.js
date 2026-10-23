@@ -334,12 +334,17 @@ export function kgStep(ka, ks, dt) {
         const i = Math.floor((k.x - (OX - HW)) / TILE), j = Math.floor((k.z - (OZ - HD)) / TILE);
         if (i < 0 || j < 0 || i >= TNX || j >= TNZ) continue;
         const ti = j * TNX + i, v = ka.tl[ti];
-        if (v === 0) ka.tl[ti] = Math.max(0.01, Math.round(ka.t * 100) / 100);
-        else if (v < 0) { ka.out[k.slot] = ka.t; fx('fall', k.x, k.z, k.slot); }
+        ka.on = ka.on || {}; ka.onT = ka.onT || {};
+        // la piastrella si crepa quando la lasci (o se ci resti fermo più di 2,5 secondi)
+        const prev = ka.on[k.slot];
+        if (prev != null && prev !== ti && ka.tl[prev] === 0) ka.tl[prev] = Math.max(0.01, Math.round(ka.t * 100) / 100);
+        if (prev !== ti) { ka.on[k.slot] = ti; ka.onT[k.slot] = ka.t; }
+        else if (v === 0 && ka.t - ka.onT[k.slot] > 2.5) ka.tl[ti] = ka.t;
+        if (v < 0) { ka.out[k.slot] = ka.t; fx('fall', k.x, k.z, k.slot); }
       }
       // dopo 25 secondi crollano anche piastrelle a caso, così finisce
-      if (ka.t > 25 && rr(ka) < dt * (0.6 + (ka.t - 25) * 0.05)) { const ti = Math.floor(rr(ka) * ka.tl.length); if (ka.tl[ti] === 0) ka.tl[ti] = ka.t; }
-      for (let i = 0; i < ka.tl.length; i++) if (ka.tl[i] > 0 && ka.t - ka.tl[i] > 1.1) ka.tl[i] = -1;
+      if (ka.t > 20 && rr(ka) < dt * (0.8 + (ka.t - 20) * 0.08)) { const ti = Math.floor(rr(ka) * ka.tl.length); if (ka.tl[ti] === 0) ka.tl[ti] = ka.t; }
+      for (let i = 0; i < ka.tl.length; i++) if (ka.tl[i] > 0 && ka.t - ka.tl[i] > 1.4) ka.tl[i] = -1;
       if (alive.length <= 1 && ks.length > 1) ka.over = true;
       break;
     }
@@ -539,10 +544,10 @@ export function kgCpu(ka, k, others, brain) {
           const p = { x: OX + (Math.random() * 2 - 1) * (HW - 6), z: OZ + (Math.random() * 2 - 1) * (HD - 6) };
           if (tileState(ka, p.x, p.z) !== 0) continue;
           let sc = -Math.abs(d2(k, p) - 16);
-          for (let s = 1; s <= 4; s++) { const q = { x: k.x + (p.x - k.x) * s / 4, z: k.z + (p.z - k.z) * s / 4 }; if (tileState(ka, q.x, q.z) < 0) sc -= 40; }
+          for (let s = 1; s <= 4; s++) { const q = { x: k.x + (p.x - k.x) * s / 4, z: k.z + (p.z - k.z) * s / 4 }; const ts = tileState(ka, q.x, q.z); if (ts < 0) sc -= 40; else if (ts > 0) sc -= 12; }
           if (sc > bs) { bs = sc; best = p; }
         }
-        brain.pt = best || { x: OX, z: OZ }; brain.next = brain.t + 1.2;
+        brain.pt = best || { x: OX, z: OZ }; brain.next = brain.t + 0.8;
       }
       tg = brain.pt;
       break;

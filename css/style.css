@@ -424,3 +424,16 @@ button { font-family: inherit; cursor: pointer; }
 .storia-table tr.hd td { color: var(--muted); font-size: 13px; letter-spacing: 1px; text-transform: uppercase; border-top: 0; }
 .storia-table b { color: var(--yellow); }
 .storia-reset.armed { background: var(--red); border-color: var(--red); color: #fff; }
+
+/* piste con la foto nella lobby */
+.track-row { margin: 18px 0 4px; }
+.track-row .label { display: block; margin-bottom: 8px; }
+.track-cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.track-card { position: relative; padding: 0; border: 3px solid transparent; border-radius: 14px; overflow: hidden; background: var(--ink-2); color: #fff; cursor: pointer; text-align: left; transition: transform .12s, border-color .12s, opacity .12s; }
+.track-card img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.track-card span { display: block; padding: 6px 8px 8px; font-weight: 900; font-size: 14px; line-height: 1.15; }
+.track-card.on { border-color: var(--yellow); transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.track-card.off { opacity: .45; filter: grayscale(.6); }
+.track-card b { position: absolute; top: 6px; left: 6px; width: 28px; height: 28px; border-radius: 50%; background: var(--yellow); color: #1a1a1a; display: grid; place-items: center; font-size: 15px; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+.track-card:disabled { cursor: default; }
+@media (max-width: 1100px) { .track-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

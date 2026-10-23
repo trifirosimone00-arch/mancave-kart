@@ -2,8 +2,9 @@
 import { iceServers, PEER_PREFIX } from './net.js';
 import { CARDS, comboOf, HAND_SIZE } from './cards.js';
 import { createMgPhone } from './mg-phone.js';
+import { PILOTS, PILOT_COLORS } from './pilots.js';
 const $ = (id) => document.getElementById(id);
-const COLORS = ['#e8322b', '#ff8a00', '#ffcc00', '#2ec46b', '#1fb5c9', '#2f7bff', '#9b5cff', '#ff4fa3'];
+const COLORS = PILOT_COLORS;
 
 const CARD_ICON = { turbo: '🔥', superturbo: '🔥', shield: '🛡️', supershield: '🛡️', oil: '🛢️', drunk: '🍺', missile: '🚀', magnet: '🧲',
   invert: '🔄', handbrake: '✋', mini: '🐜', call: '📞', police: '🚓', remote: '⏪', swap: '🔀', thief: '🦹', mirror: '🪞' };
@@ -52,18 +53,43 @@ window.addEventListener('orientationchange', () => setTimeout(checkRotate, 200))
 if (params.get('r')) $('code-field').classList.add('hidden');
 $('code').value = st.code;
 $('name').value = st.name;
-function drawSwatches() {
-  const el = $('swatches');
-  el.innerHTML = '';
-  for (const c of COLORS) {
-    const b = document.createElement('button');
-    b.type = 'button'; b.style.background = c; b.className = st.color === c ? 'on' : '';
-    b.setAttribute('aria-label', 'Colore ' + c);
-    b.onclick = () => { st.color = c; store.set('color', c); drawSwatches(); };
-    el.appendChild(b);
+// scelta del pilota: 8 piloti, ognuno col suo colore e numero; quelli presi da altri sono grigi
+function drawPilots() {
+  const taken = new Set((st.status && st.status.taken) || []);
+  for (const el of [$('swatches'), $('wait-pilots')]) {
+    if (!el) continue;
+    el.innerHTML = '';
+    for (const p of PILOTS) {
+      const b = document.createElement('button');
+      const isTaken = taken.has(p.color) && st.color !== p.color;
+      b.type = 'button';
+      b.className = 'pilot' + (st.color === p.color ? ' on' : '') + (isTaken ? ' taken' : '');
+      b.style.setProperty('--pc', p.color);
+      b.setAttribute('aria-label', `Pilota ${p.num} ${p.name}` + (isTaken ? ' (preso)' : ''));
+      b.disabled = isTaken;
+      b.innerHTML = `<img src="assets/piloti/${p.num}.png" alt=""><span class="pnum">${p.num}</span>` + (isTaken ? '<span class="ptaken">preso</span>' : '');
+      b.onclick = () => choosePilot(p.color);
+      el.appendChild(b);
+    }
   }
 }
-drawSwatches();
+function choosePilot(c) {
+  if (st.color === c) return;
+  st.color = c; store.set('color', c);
+  applyColor();
+  drawPilots();
+  // già in stanza: lo dico allo schermo (se è preso intanto, lo schermo me ne dà un altro)
+  if (st.view === 'wait' && connected && conn) conn.send({ t: 'hello', cid, name: st.name, color: st.color, remote: params.get('remote') === '1' });
+}
+function applyColor() {
+  document.documentElement.style.setProperty('--kart', st.color);
+  const hub = $('wheel-hub'), mark = $('wheel-mark');
+  if (hub) hub.setAttribute('fill', st.color);
+  if (mark) mark.setAttribute('fill', st.color);
+  const wk = $('wait-kart');
+  if (wk) { const p = PILOTS.find(q => q.color === st.color); wk.style.backgroundImage = p ? `url(assets/piloti/${p.num}.png)` : ''; }
+}
+drawPilots();
 function drawMode() {
   for (const seg of [$('mode'), $('mode2')]) for (const b of seg.children) b.classList.toggle('on', b.dataset.m === st.mode);
   $('left-tilt').classList.toggle('hidden', st.mode !== 'tilt');
@@ -214,6 +240,7 @@ function onData(msg) {
   switch (msg.t) {
     case 'welcome':
       $('enter').disabled = false; $('join-err').textContent = '';
+      if (msg.color && msg.color !== st.color) { st.color = msg.color; store.set('color', st.color); applyColor(); drawPilots(); }
       sendPhoto();
       if (st.view === 'join') show('wait');
       break;
@@ -238,7 +265,10 @@ function onStatus(s) {
   if (s.phase === 'podium' && st.view !== 'end') show('end');
 
   // attesa
-  $('wait-kart').style.background = st.color;
+  if (s.color && s.color !== st.color) { st.color = s.color; store.set('color', st.color); applyColor(); }
+  const tk = (s.taken || []).join(',');
+  if (tk !== st.takenKey || st.pilotDrawn !== st.color) { st.takenKey = tk; st.pilotDrawn = st.color; drawPilots(); }
+  $('wait-pilots').classList.toggle('hidden', s.phase !== 'lobby');
   $('wait-title').textContent = `Sei dentro, ${st.name}!`;
   $('captain').classList.toggle('hidden', !s.captain);
   $('wait-text').textContent = s.captain ? 'Sei il capo stanza: quando ci siete tutti, avvia la gara.' : 'Aspetta che il capo stanza faccia partire la gara.';
@@ -356,9 +386,7 @@ function loop() {
   send();
 }
 setInterval(loop, 33);
-document.documentElement.style.setProperty('--kart', st.color);
-$('wheel-hub').setAttribute('fill', st.color);
-$('wheel-mark').setAttribute('fill', st.color);
+applyColor();
 
 // ------------------------------------------------------------------ schermo sempre acceso, schermo intero
 let lock = null;

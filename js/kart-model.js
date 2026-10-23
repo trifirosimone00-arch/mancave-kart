@@ -1,6 +1,7 @@
 // Kart e pilota in stile cartoon: forme tonde, colori pieni, pilota con la testa grande.
 // Le misure restano quelle di prima (2,3 di larghezza, 4,7 di lunghezza) per non cambiare la fisica.
 import * as THREE from 'three';
+import { pilotOf } from './pilots.js';
 
 const geoCache = {};
 function cached(key, make) { return geoCache[key] || (geoCache[key] = make()); }
@@ -114,7 +115,7 @@ export function buildKartModel(slot, color) {
   add(cached('intake', () => roundBox(0.9, 0.18, 0.12, 0.05)), carbon, 0, 0.52, 2.5);
   // striscia bianca sul muso e numero
   add(cached('stripe', () => roundBox(0.5, 0.06, 1.3, 0.03)), white, 0, 0.99, 1.45).rotation.x = 0.06;
-  const num = add(cached('numPlane', () => new THREE.CircleGeometry(0.34, 24)), new THREE.MeshBasicMaterial({ map: numberTex(slot + 1, color) }), 0, 0.66, 2.62);
+  const num = add(cached('numPlane', () => new THREE.CircleGeometry(0.34, 24)), new THREE.MeshBasicMaterial({ map: numberTex(pilotOf(color) ? pilotOf(color).num : slot + 1, color) }), 0, 0.66, 2.62);
   // sedile
   add(cached('seat', () => roundBox(1.1, 1.1, 0.35, 0.15)), black, 0, 1.25, -0.95).rotation.x = -0.2;
   add(cached('seatB', () => roundBox(1.1, 0.25, 0.9, 0.1)), black, 0, 0.88, -0.55);

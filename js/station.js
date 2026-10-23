@@ -7,6 +7,7 @@ import { buildTrack, obstaclesAt, TRACK_LIST } from './track.js';
 import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance, placeAt, giveBoost } from './sim.js';
 import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, PORTAL_COOLDOWN, PORTAL_FRACTIONS } from './cards.js';
 import { createRenderer, kartThumb } from './render.js';
+import { PILOTS, freePilotColor } from './pilots.js';
 import { createScreenConfig, bindLayoutButtons, bindScreenBar } from './screen-ui.js';
 import { iceServers, PEER_PREFIX, hasTurn } from './net.js';
 import { CPU_LEVELS, CPU_NAMES, newBrain, cpuInput } from './ai.js';
@@ -220,8 +221,8 @@ function requestJoin(l) {
   if (MASTER) {
     const r = assignSlot(l.cid, l.name, l.color, 'self');
     if (r.error) { send(l.conn, { t: r.error }); locals.delete(l.cid); return; }
-    l.slot = r.slot;
-    send(l.conn, { t: 'welcome', slot: l.slot });
+    l.slot = r.slot; if (r.color) l.color = r.color;
+    send(l.conn, { t: 'welcome', slot: l.slot, color: l.color });
     pushStatus(true);
   } else {
     if (!masterOk) { setTimeout(() => locals.has(l.cid) && requestJoin(l), 1000); return; }
@@ -255,6 +256,7 @@ function pushStatus(force) {
     const wk = W.karts.find(q => q.slot === l.slot);
     send(l.conn, {
       t: 'st', phase: W.phase, laps: W.laps, n: W.players.length, captain: W.captain === l.slot,
+      taken: W.players.filter(q => q.slot !== l.slot).map(q => q.color), color: (regBySlot(l.slot) || l).color,
       paused: W.paused, pauseMsg: W.pauseMsg, slot: l.slot,
       place: MASTER ? (k ? k.place : 0) : (wk ? wk.place : 0), lap: k ? Math.max(1, Math.min(W.laps, k.lapCount)) : 0,
       finished: k ? k.finished : false, air: k ? k.air : false,
@@ -269,7 +271,9 @@ function pushStatus(force) {
 // ------------------------------------------------------------------ PC principale: registro e comandi
 function assignSlot(cid, name, color, station) {
   let p = W.players.find(q => q.cid === cid);
-  if (p) { Object.assign(p, { name, color, station, connected: true }); maybeResume(); drawLobby(); return { slot: p.slot }; }
+  // ogni pilota (colore) una volta sola: se è già preso ne do uno libero
+  color = freePilotColor(color, W.players.filter(q => q.cid !== cid).map(q => q.color));
+  if (p) { Object.assign(p, { name, color, station, connected: true }); maybeResume(); drawLobby(); pushStatus(true); return { slot: p.slot, color }; }
   if (W.phase !== 'lobby' && W.phase !== 'podium') return { error: 'busy' };
   if (W.players.length >= MAX_PLAYERS) return { error: 'full' };
   const used = new Set(W.players.map(q => q.slot));
@@ -277,8 +281,8 @@ function assignSlot(cid, name, color, station) {
   W.players.push({ slot, cid, name, color, station, connected: true, kbd: cid.startsWith('kbd'), cpu: cid.startsWith('cpu') });
   W.players.sort((a, b) => a.slot - b.slot);
   toast(`${name} è entrato${station === 'self' ? '' : ' (a distanza)'}`);
-  updateCaptain(); drawLobby();
-  return { slot };
+  updateCaptain(); drawLobby(); pushStatus(true);
+  return { slot, color };
 }
 
 function removePlayer(slot) {
@@ -333,7 +337,7 @@ function onStationMsg(conn, msg) {
   switch (msg.t) {
     case 'join': {
       const r = assignSlot(String(msg.cid), String(msg.name || 'Pilota').slice(0, 14), msg.color, sid);
-      send(conn, r.error ? { t: 'deny', cid: msg.cid, why: r.error } : { t: 'joined', cid: msg.cid, slot: r.slot });
+      send(conn, r.error ? { t: 'deny', cid: msg.cid, why: r.error } : { t: 'joined', cid: msg.cid, slot: r.slot, color: r.color });
       break;
     }
     case 'cmd': { const p = regBySlot(msg.slot); if (p && p.station === sid) handleCommand(msg.slot, msg.msg || {}); break; }
@@ -394,8 +398,8 @@ function onMasterMsg(msg) {
     case 'joined': {
       const l = locals.get(String(msg.cid));
       if (!l) return;
-      l.slot = msg.slot;
-      send(l.conn, { t: 'welcome', slot: l.slot });
+      l.slot = msg.slot; if (msg.color) l.color = msg.color;
+      send(l.conn, { t: 'welcome', slot: l.slot, color: l.color });
       break;
     }
     case 'deny': {

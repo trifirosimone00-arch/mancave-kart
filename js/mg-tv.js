@@ -438,13 +438,13 @@ export function drawPit(el, P, players) {
     el.innerHTML = `<div class="tz-box">
       <div class="tz-head">
         <div class="tz-ico">${icon(P.game)}</div>
-        <div class="tz-tt"><div class="tz-tags"><span class="tz-tag">${P.grid ? 'GRIGLIA DI PARTENZA' : `PIT STOP ${esc(P.n)}${P.of ? ' di ' + esc(P.of) : ''}`}</span><span class="tz-kind">${esc(g.kind)}</span></div>
+        <div class="tz-tt"><div class="tz-tags"><span class="tz-tag">${P.battle ? 'MODALITÀ BATTAGLIA' : P.grid ? 'GRIGLIA DI PARTENZA' : `PIT STOP ${esc(P.n)}${P.of ? ' di ' + esc(P.of) : ''}`}</span><span class="tz-kind">${esc(g.kind)}</span></div>
           <h2 class="tz-title">${esc(g.title)}</h2></div>
         ${TIMER_HTML}
       </div>
       <div class="tz-body"></div>
       <div class="tz-skip"></div>
-      <div class="tz-foot">${P.grid ? 'Chi vince il minigioco parte in prima fila' : 'La gara è in pausa · si riparte dalle posizioni di adesso'}</div>
+      <div class="tz-foot">${P.battle ? 'Vince l\'ultimo con almeno un palloncino' : P.grid ? 'Chi vince il minigioco parte in prima fila' : 'La gara è in pausa · si riparte dalle posizioni di adesso'}</div>
     </div>`;
     const R = el._r = { timer: el.querySelector('.tz-timer'), body: el.querySelector('.tz-body'), skip: el.querySelector('.tz-skip'), tiles: [] };
     R.timer._b = R.timer.querySelector('b'); R.timer._s = R.timer.querySelector('span'); R.timer._ring = R.timer.querySelector('.tz-ring');

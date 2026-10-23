@@ -48,6 +48,7 @@ const MODES = {
   gp: { label: 'Gran Premio', short: 'Gran Premio', races: 4 },
   tempo: { label: 'Contro il tempo', short: 'Contro il tempo' },
   torneo: { label: 'Torneo Mancave', short: 'Torneo', races: 3 },
+  battaglia: { label: 'Battaglia', short: 'Battaglia' },
 };
 const PTS = [10, 7, 5, 3, 2, 1];  // punti per posizione (Gran Premio, Torneo, classifica storica)
 const MG_PTS = [3, 2, 1];         // (Torneo) punti per i minigiochi
@@ -509,6 +510,8 @@ function startRace() {
   buildKarts();
   setPause(false);
   // prima della gara: un minigioco a caso decide la griglia di partenza (con almeno 2 piloti)
+  // Battaglia: niente gara, si va dritti nell'arena coi palloncini
+  if (W.mode === 'battaglia') { startPit(false, 'battaglia'); return; }
   if (W.players.length >= 2 && params.get('grid') !== '0' && W.mode !== 'tempo') { startPit(true); return; }
   onPhaseChange();
   pushStatus(true);
@@ -1508,8 +1511,8 @@ function checkPit() {
   if (lead >= at) startPit();
 }
 
-function startPit(grid = false) {
-  const forced = params.get('mg');
+function startPit(grid = false, want = null) {
+  const forced = want || params.get('mg');
   W.pitsDone++;
   if (!grid && W.mgType !== 'kart' && (forced === 'lampo' || (!(forced && GAMES[forced]) && Math.random() < LAMPO_CHANCE))) { W.pitsDone--; startLampo(); return; }
   W.pitsDone--;
@@ -1533,6 +1536,7 @@ function startPit(grid = false) {
     W.pit.qs = qs.map(({ q, cat, answers }) => ({ q, cat, answers }));
   }
   if (game === 'semaforo') W.pit.duel = duelStart(W.players.map(p => p.slot), seed, short);
+  if (want) W.pit.battle = true;
   if (GAMES[game].kart) { W.pit.kart = true; W.pit.ka = kgInit(game, seed, W.players.map(p => p.slot)); W.pit.order = W.players.map(p => p.slot); }
   mgStates.clear();
   W.phase = 'pit';
@@ -1593,6 +1597,14 @@ function pitLocalStep() {
       applyPrize(r.slot, r.prize);
     }
   }
+}
+
+// fine della Battaglia: la classifica dell'arena diventa il podio
+function endBattle(results) {
+  W.results = [...results].sort((a, b) => a.place - b.place).map(r => { const p = regBySlot(r.slot) || {}; return { slot: r.slot, name: p.name || 'Pilota', color: p.color || '#888', place: r.place, time: null }; });
+  W.pit = null;
+  W.phase = 'podium';
+  onPhaseChange(); pushStatus(true);
 }
 
 // ------------------------------------------------------------------ minigiochi col kart (su ogni schermo, per i propri kart)
@@ -1714,7 +1726,10 @@ function pitStep() {
     for (const slot of P.tie.slots) P.tieLive[slot] = st(slot).tie || 0;
     if (P.stageT >= TIE_INTRO + TIE_TAP + 0.6) finishRanking(applyTie(P.preRank, P.tieLive, P.seed));
   } else if (P.stage === 'results') {
-    if (P.stageT >= PIT_RESULTS || allSkipped(P)) { P.stage = 'go'; P.stageT = 0; pushStatus(true); }
+    if (P.stageT >= PIT_RESULTS || allSkipped(P)) {
+      if (P.battle) { endBattle(P.results); return; }
+      P.stage = 'go'; P.stageT = 0; pushStatus(true);
+    }
   } else if (P.stage === 'go') {
     if (P.stageT >= PIT_GO) {
       if (P.grid) { gridFromResults(P.results); return; }
@@ -1818,7 +1833,7 @@ function endPlay() {
 }
 function finishRanking(ranking) {
   const P = W.pit;
-  P.results = ranking.map(r => ({ ...r, prize: P.grid ? { text: `Parti ${r.place}°` } : prizeFor(r.place, ranking.length) }));
+  P.results = ranking.map(r => ({ ...r, prize: P.grid ? { text: `Parti ${r.place}°` } : P.battle ? { text: `${r.place}° posto` } : prizeFor(r.place, ranking.length) }));
   if (W.mode === 'torneo') tournamentMg(P.results);
   P.stage = 'results'; P.stageT = 0;
   pushStatus(true);
@@ -2047,6 +2062,7 @@ function drawModeSel() {
   const tname = (TRACK_LIST.find(t => t.id === track.id) || {}).name || track.id;
   let txt = 'Una gara con carte e minigiochi ai pit stop.';
   if (W.mode === 'gp') txt = `4 gare di fila${TRACK_IDS.length > 1 ? ' (si cambia pista)' : ''}. Punti: 10, 7, 5, 3, 2, 1. Chi ne fa di più è campione.`;
+  else if (W.mode === 'battaglia') txt = 'Niente gara: tutti nell\'arena con 3 palloncini. Centra gli altri col muso per scoppiarli, l\'ultimo rimasto vince.';
   else if (W.mode === 'torneo') txt = '3 gare a punti (10, 7, 5, 3…) e anche i minigiochi danno punti: 3, 2, 1.';
   else if (W.mode === 'tempo') {
     const rec = MASTER ? recordText(track.id, W.laps) : '';

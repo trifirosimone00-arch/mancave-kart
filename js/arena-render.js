@@ -16,7 +16,7 @@ function canvasTex(w, h, draw) {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
   return t;
 }
-const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05, ...o });
+const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05, envMapIntensity: 0.5, ...o });
 
 // disegno del campo (vista dall'alto, 1 px = 0.1 unità)
 function floorTex(game) {
@@ -160,7 +160,7 @@ export function createArenaView(scene, cfx) {
   for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
     const leg = new THREE.Mesh(new THREE.BoxGeometry(5, 80, 5), wood); leg.position.set(OX + a * (HW + 8), -43, OZ + b * (HD + 8)); root.add(leg);
   }
-  const floorMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
+  const floorMat = new THREE.MeshStandardMaterial({ roughness: 0.8, envMapIntensity: 0.45 });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(HW * 2, HD * 2), floorMat);
   floor.rotation.x = -Math.PI / 2; floor.position.set(OX, 0.02, OZ); floor.receiveShadow = true; root.add(floor);
   // sponde morbide (cuscini) tutto intorno
@@ -170,7 +170,7 @@ export function createArenaView(scene, cfx) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, 2.6, d), rimMat); m.position.set(x, 1.3, z); m.castShadow = true; root.add(m); rims.push(m);
   }
   // luce propria dell'arena (il sole della Mancave è lontano)
-  const sun = new THREE.DirectionalLight('#fff4e0', 0.9); sun.position.set(OX - 30, 100, OZ + 45); sun.target.position.set(OX, 0, OZ);
+  const sun = new THREE.DirectionalLight('#fff4e0', 0.35); sun.position.set(OX - 30, 100, OZ + 45); sun.target.position.set(OX, 0, OZ);
   sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
   Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 55, bottom: -55, near: 10, far: 260 });
   root.add(sun, sun.target);

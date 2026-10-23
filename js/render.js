@@ -984,7 +984,11 @@ export function createRenderer(canvas, hudRoot, track) {
       arena.placeCamera(arenaCam, W / H, tsec);
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, W, H);
+      // l'arena è all'aperto sotto la luce della stanza: abbasso un po' l'esposizione per colori più pieni
+      const ex = renderer.toneMappingExposure, fog = scene.fog;
+      renderer.toneMappingExposure = ex * 0.8; scene.fog = null;
       renderer.render(scene, arenaCam);
+      renderer.toneMappingExposure = ex; scene.fog = fog;
       return;
     }
     if (hudRoot.classList.contains('arena-on')) { hudRoot.classList.remove('arena-on'); arena.lit = false; renderer.shadowMap.needsUpdate = true; }

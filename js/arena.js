@@ -50,8 +50,14 @@ export function slalomGates() {
     const a = i / SLALOM_N * Math.PI * 2;
     const r = i % 2 ? 0.5 : 0.82;
     const x = OX + Math.cos(a) * (HW - 8) * r, z = OZ + Math.sin(a) * (HD - 6) * r;
-    out.push({ x, z, a: a + Math.PI / 2 });
+    out.push({ x, z });
   }
+  // le lattine stanno di traverso rispetto alla strada (perpendicolari a chi arriva)
+  out.forEach((g, i) => {
+    const p = out[(i - 1 + out.length) % out.length], n = out[(i + 1) % out.length];
+    const dx = n.x - p.x, dz = n.z - p.z, l = Math.hypot(dx, dz) || 1;
+    g.px = -dz / l; g.pz = dx / l;
+  });
   return out;
 }
 const BASES = [[-1, -1], [1, 1], [1, -1], [-1, 1]].map(([a, b]) => ({ x: OX + a * (HW - 8), z: OZ + b * (HD - 7) }));
@@ -176,7 +182,7 @@ export function slalomCans() {
   if (cansCache) return cansCache;
   cansCache = [];
   for (const g of slalomGates()) {
-    const cx = Math.cos(g.a), cz = Math.sin(g.a);
+    const cx = g.px, cz = g.pz;
     // le porte sono larghe 9: due lattine ai lati
     cansCache.push({ x: g.x + cx * 5.5, z: g.z + cz * 5.5, r: 1.1 }, { x: g.x - cx * 5.5, z: g.z - cz * 5.5, r: 1.1 });
   }
@@ -468,14 +474,14 @@ export function kgLabel(ka, slot) {
     case 'battaglia': return ka.out[slot] != null ? 'Fuori' : `${'🎈'.repeat(Math.max(0, ka.bal[slot] || 0))} · ${v} colpi`;
     case 'calcetto': return `${ka.team[slot] ? 'Blu' : 'Arancio'} ${ka.tg[ka.team[slot]]}-${ka.tg[1 - ka.team[slot]]}${v ? ` ⚽${v}` : ''}`;
     case 'collina': return `${v} pt${ka.king === slot ? ' 👑' : ''}`;
-    case 'slalom': return `${v} porte`;
-    case 'bowling': return `${v} birilli`;
-    case 'parcheggio': return `${v} parcheggi`;
-    case 'autoscontro': return `${v} botte`;
-    case 'bandiera': return `${v} bandiere${ka.flag && ka.flag.by === slot ? ' 🚩' : ''}`;
-    case 'birra': return `${v} birre${ka.hold[slot] ? ' 🍺' : ''}`;
-    case 'raccogli': return `${v} patatine`;
-    case 'monete': return `${v} monete`;
+    case 'slalom': return v === 1 ? '1 porta' : `${v} porte`;
+    case 'bowling': return v === 1 ? '1 birillo' : `${v} birilli`;
+    case 'parcheggio': return v === 1 ? '1 parcheggio' : `${v} parcheggi`;
+    case 'autoscontro': return v === 1 ? '1 botta' : `${v} botte`;
+    case 'bandiera': return `${v === 1 ? '1 bandiera' : v + ' bandiere'}${ka.flag && ka.flag.by === slot ? ' 🚩' : ''}`;
+    case 'birra': return `${v === 1 ? '1 birra' : v + ' birre'}${ka.hold[slot] ? ' 🍺' : ''}`;
+    case 'raccogli': return v === 1 ? '1 patatina' : `${v} patatine`;
+    case 'monete': return v === 1 ? '1 moneta' : `${v} monete`;
     case 'biliardo': return `${v} in buca`;
     case 'gatto': return `${v} pt`;
   }

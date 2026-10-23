@@ -254,5 +254,5 @@ html.rot #pad, html.rot #mg { inset: auto; top: 0; left: 0; width: 100vh; height
 .card .ic { font-size: 34px; line-height: 1; text-align: center; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35)); }
 
 /* minigioco col kart: niente carte, il messaggio in alto è il punteggio */
-body.kart-mg #hand, body.kart-mg .hand, body.kart-mg .cards { visibility: hidden; }
+body.kart-mg #hand, body.kart-mg .hand, body.kart-mg .cards, body.kart-mg #hand-hint { visibility: hidden; }
 body.kart-mg .pad-msg { font-size: 22px; color: #ffd400; }

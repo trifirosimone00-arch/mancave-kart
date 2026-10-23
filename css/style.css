@@ -372,3 +372,53 @@ button { font-family: inherit; cursor: pointer; }
 .pcard .kart.thumb { width: 108px; height: 72px; background-color: transparent; background-size: contain; background-position: center; background-repeat: no-repeat; border-radius: 0; }
 .pcard .kart.thumb::after, .pcard .kart.ph::after { display: none; }
 .pcard .kart.ph { width: 64px; height: 64px; border-radius: 50%; background-size: cover; background-position: center; border: 4px solid #fff; }
+
+/* ---------------- modalità di gioco ---------------- */
+.mode-row { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-end; justify-content: space-between; margin: 22px 0 0; }
+.mode-row > div { display: flex; flex-direction: column; gap: 6px; }
+.mode-row .seg { flex-wrap: wrap; }
+.mode-row .seg button.on { background: var(--yellow); color: #1a1a1a; }
+.mode-info { margin: 8px 0 0; }
+.mode-info.rec { color: var(--yellow); }
+/* podio: intestazione della modalità, campione, record */
+.mode-head { text-align: center; margin: 0 0 6px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.mode-tag { display: inline-block; background: var(--ink-2); border: 2px solid var(--ink-3); border-radius: 999px; padding: 4px 16px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; color: var(--yellow); font-size: clamp(14px, 2vmin, 22px); }
+.champ { display: flex; flex-direction: column; align-items: center; background: var(--yellow); color: #1a1a1a; border-radius: 18px; padding: 10px 26px; box-shadow: 0 6px 0 #b38f00; }
+.champ small { font-weight: 900; letter-spacing: 1px; font-size: clamp(16px, 2.4vmin, 26px); }
+.champ b { font-family: 'Bungee', 'Arial Black', sans-serif; font-weight: 400; font-size: clamp(36px, 7vmin, 80px); line-height: 1.05; }
+.champ.rec { background: var(--red); color: #fff; box-shadow: 0 6px 0 #8f1c17; animation: recPulse 1s ease-in-out infinite alternate; }
+.champ.rec b { font-size: clamp(32px, 6vmin, 66px); }
+.champ.rec small { text-align: center; }
+@keyframes recPulse { from { transform: scale(1); } to { transform: scale(1.04); } }
+.rec-now { font-weight: 800; color: var(--muted); font-size: clamp(14px, 2vmin, 20px); }
+.results td.pts { color: var(--yellow); font-weight: 900; width: 70px; }
+.results td.best { color: var(--muted); }
+.gp-next { text-align: center; font-weight: 900; color: var(--muted); font-size: clamp(16px, 2.2vmin, 24px); margin: 0 0 12px; }
+.gp-next:empty { display: none; }
+/* podio della serie: gara a sinistra, classifica generale a destra (grande, si legge dal divano) */
+#podium .panel.gp { width: min(1500px, 100%); max-height: 96vh; overflow: auto; }
+#podium .panel.gp h2 { margin-bottom: 8px; font-size: clamp(30px, 4.4vmin, 48px); }
+#podium .panel.gp .podium-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 28px; align-items: start; }
+#podium .panel.gp .stands { min-height: 200px; margin-bottom: 12px; }
+#podium .panel.gp .stand.p1 .block { height: 120px; }
+#podium .panel.gp .stand.p2 .block { height: 85px; }
+#podium .panel.gp .stand.p3 .block { height: 60px; }
+.gp-box { background: var(--ink-2); border-radius: 18px; padding: 16px 18px; border: 2px solid var(--ink-3); }
+.gp-box .label { color: var(--yellow); font-size: clamp(14px, 2vmin, 20px); }
+.gp-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.gp-table td { padding: 1.1vmin 10px; border-top: 1px solid var(--ink-3); font-weight: 900; font-size: clamp(22px, 3.6vmin, 40px); vertical-align: middle; }
+.gp-table tr:first-child td { border-top: 0; }
+.gp-table .gp-pl { width: 2.4em; font-family: 'Bungee', 'Arial Black', sans-serif; font-weight: 400; color: var(--muted); }
+.gp-table tr.lead .gp-pl, .gp-table tr.lead .gp-pts { color: var(--yellow); }
+.gp-table .sw { display: inline-block; width: 0.6em; height: 0.6em; border-radius: 50%; margin-right: 10px; vertical-align: 0.02em; }
+.gp-table small { display: block; font-size: 0.45em; color: var(--muted); font-weight: 800; }
+.gp-table .r { text-align: right; font-variant-numeric: tabular-nums; }
+.gp-table .gp-plus { color: var(--green); font-size: clamp(16px, 2.4vmin, 26px); }
+.gp-table .gp-pts { font-family: 'Bungee', 'Arial Black', sans-serif; font-weight: 400; width: 3em; }
+@media (max-width: 900px) { #podium .panel.gp .podium-cols { grid-template-columns: 1fr; } }
+/* classifica storica */
+#storia .panel { width: min(900px, 100%); max-height: 92vh; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.storia-table { margin-bottom: 6px; }
+.storia-table tr.hd td { color: var(--muted); font-size: 13px; letter-spacing: 1px; text-transform: uppercase; border-top: 0; }
+.storia-table b { color: var(--yellow); }
+.storia-reset.armed { background: var(--red); border-color: var(--red); color: #fff; }

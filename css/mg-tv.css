@@ -1,0 +1,318 @@
+/* ---------------- pit stop sulla TV: grafica a cartone animato (disegni in js/mg-tv.js) ---------------- */
+.pit.pit-toon {
+  --ink: #1d1733;
+  --cream: #fff8ea;
+  --tz-font: 'Bungee', 'Arial Black', 'Inter', sans-serif;
+  padding: 2.4vmin 3vmin;
+  background:
+    radial-gradient(ellipse at 50% 35%, rgba(67,56,170,0.55), rgba(16,12,44,0) 70%),
+    repeating-conic-gradient(from 0deg at 50% 38%, rgba(255,255,255,0.045) 0deg 9deg, rgba(255,255,255,0) 9deg 18deg),
+    linear-gradient(180deg, rgba(36,28,96,0.985), rgba(13,10,36,0.99));
+}
+.pit.pit-toon.pit-clear { background: transparent; }
+
+/* scritte "fumetto" comuni negli SVG */
+.pit-toon .tz-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.pit-toon .tz-bt, .pit-toon .tz-cant, .pit-toon .tz-cardn, .pit-toon .tz-streak { font-family: var(--tz-font); font-weight: 900; }
+.pit-toon .tz-bt { stroke: var(--ink); stroke-width: 3px; paint-order: stroke; stroke-linejoin: round; }
+.pit-toon .tz-cant { fill: var(--ink); }
+.pit-toon .tz-cards { font-family: 'Nunito', sans-serif; font-weight: 900; }
+.pit-toon .tz-streak { fill: var(--ink); }
+.pit-toon .f-c { fill: var(--c, #e8322b); }
+.pit-toon .tz-shd { fill: #000; opacity: 0.22; }
+
+/* ---------------- impaginazione ---------------- */
+.pit-toon .tz-box { width: min(1500px, 100%); height: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 1.8vmin; }
+.pit-toon .tz-head { display: flex; align-items: center; gap: 2.2vmin; }
+.pit-toon .tz-ico { flex: none; width: 11vmin; height: 11vmin; padding: 1.3vmin; box-sizing: border-box; border-radius: 50%; background: var(--cream);
+  border: 0.6vmin solid var(--ink); box-shadow: 0 0.8vmin 0 rgba(0,0,0,0.35); animation: tzBob 2.4s ease-in-out infinite; }
+.pit-toon .tz-tt { flex: 1; min-width: 0; }
+.pit-toon .tz-tags { display: flex; flex-wrap: wrap; gap: 1vmin; align-items: center; }
+.pit-toon .tz-tag, .pit-toon .tz-kind { font-family: var(--tz-font); font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; font-size: clamp(13px, 2.3vmin, 30px);
+  padding: 0.35vmin 1.4vmin; border-radius: 99px; border: 0.45vmin solid var(--ink); box-shadow: 0 0.45vmin 0 var(--ink); }
+.pit-toon .tz-tag { background: #ffd400; color: var(--ink); }
+.pit-toon .tz-kind { background: #ff4fa3; color: #fff; }
+.pit-toon .tz-title { margin: 0.8vmin 0 0; font-family: var(--tz-font); font-weight: 900; font-size: clamp(30px, 8vmin, 110px); line-height: 1; color: #fff;
+  -webkit-text-stroke: 0.05em var(--ink); paint-order: stroke fill; text-shadow: 0 0.08em 0 var(--ink), 0 0.14em 0 rgba(0,0,0,0.25);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0.04em 0.06em 0.12em; }
+
+/* cronometro cartoon */
+.pit-toon .tz-timer { position: relative; flex: none; width: 15vmin; display: flex; flex-direction: column; align-items: center; }
+.pit-toon .tz-timer.hidden { display: none; }
+.pit-toon .tz-timer .tz-svg { width: 15vmin; height: auto; filter: drop-shadow(0 0.7vmin 0 rgba(0,0,0,0.35)); }
+.pit-toon .tz-tbg { fill: none; stroke: #e8ecf5; stroke-width: 10; }
+.pit-toon .tz-ring { fill: none; stroke: #2ec46b; stroke-width: 10; stroke-dasharray: 100; stroke-linecap: round; transition: stroke-dashoffset 0.25s linear, stroke 0.3s; }
+.pit-toon .tz-timer.hurry .tz-ring { stroke: #ff3b30; }
+.pit-toon .tz-timer b { position: absolute; left: 0; right: 0; top: 33%; text-align: center; font-family: var(--tz-font); font-weight: 900; color: var(--ink);
+  font-size: 5.6vmin; line-height: 1; }
+.pit-toon .tz-timer.long b { font-size: 3.6vmin; top: 38%; }
+.pit-toon .tz-timer.hurry b { color: #e8322b; animation: tzThrob 0.5s ease-in-out infinite; }
+.pit-toon .tz-timer span { margin-top: 0.6vmin; font-weight: 900; font-size: clamp(12px, 2vmin, 26px); color: #fff; background: var(--ink); border-radius: 99px; padding: 0.2vmin 1.2vmin; white-space: nowrap; }
+
+.pit-toon .tz-body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 1.6vmin; }
+.pit-toon .tz-skip:empty { display: none; }
+.pit-toon .tz-foot { align-self: center; font-weight: 900; font-size: clamp(12px, 2vmin, 24px); color: #d9d4ff; background: rgba(0,0,0,0.3);
+  border-radius: 99px; padding: 0.5vmin 2vmin; }
+.pit-toon .tz-sub { margin: 0; text-align: center; color: #fff; font-weight: 900; font-size: clamp(16px, 2.8vmin, 36px); text-shadow: 0 0.3vmin 0 var(--ink); }
+
+/* pallino col nome (iniziale nel colore del giocatore) */
+.pit-toon .tz-dot, .pit-toon .tz-name i, .pit-toon .tz-skipline i, .pit-toon .tz-rn i, .pit-toon .tz-prn i, .pit-toon .tz-dp i {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 1.5em; height: 1.5em; border-radius: 50%;
+  background: var(--c); color: #fff; font-style: normal; font-family: var(--tz-font); font-weight: 900; font-size: 0.8em;
+  border: 0.18em solid var(--ink); text-shadow: 0 0.08em 0 var(--ink); }
+.pit-toon .tz-dot { font-size: clamp(14px, 2.6vmin, 34px); margin: 0 0.1em; animation: tzPopIn 0.35s cubic-bezier(.3,1.6,.5,1) both; }
+
+/* SALTA */
+.pit-toon .tz-skipline { display: flex; flex-wrap: wrap; justify-content: center; gap: 1.2vmin; align-items: center; }
+.pit-toon .tz-skipline span { display: inline-flex; align-items: center; gap: 0.6em; padding: 0.5vmin 1.6vmin 0.5vmin 0.6vmin; border-radius: 99px; background: var(--cream);
+  color: var(--ink); border: 0.45vmin solid var(--ink); font-weight: 900; font-size: clamp(14px, 2.4vmin, 30px); opacity: 0.6; }
+.pit-toon .tz-skipline span.ok { opacity: 1; background: #b8f5cc; box-shadow: 0 0.45vmin 0 var(--ink); }
+.pit-toon .tz-skipline span.ok::after { content: '✓'; color: #13893f; font-size: 1.2em; }
+.pit-toon .tz-skipline em { font-style: normal; color: #fff; font-weight: 900; font-size: clamp(13px, 2.2vmin, 28px); }
+
+/* ---------------- spiegazione ---------------- */
+.pit-toon .tz-intro { display: flex; align-items: center; justify-content: center; gap: 4vmin; }
+.pit-toon .tz-demo { flex: 0 1 46%; height: 34vmin; display: flex; align-items: center; justify-content: center; gap: 2vmin; padding: 2vmin; box-sizing: border-box;
+  background: var(--cream); border: 0.7vmin solid var(--ink); border-radius: 4vmin; box-shadow: 0 1vmin 0 rgba(0,0,0,0.35); transform: rotate(-1.5deg); }
+.pit-toon .tz-demo.g-labirinto, .pit-toon .tz-demo.g-porta, .pit-toon .tz-demo.g-semaforo { background: #ffe4a8; }
+.pit-toon .tz-demo.g-porta .tz-door { height: 100%; width: auto; aspect-ratio: 120 / 176; }
+.pit-toon .tz-demo.g-porta .tz-door:nth-child(2) { animation-delay: 0.3s; }
+.pit-toon .tz-demo.g-semaforo .tz-svg { width: auto; height: 100%; }
+.pit-toon .tz-vsdemo b { font-family: var(--tz-font); font-weight: 900; font-size: 7vmin; color: #ffd400; -webkit-text-stroke: 0.06em var(--ink); paint-order: stroke fill; }
+.pit-toon .tz-qmini { width: 8vmin; height: 11vmin; border-radius: 1.6vmin; background: var(--c); border: 0.6vmin solid var(--ink); display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0.7vmin 0 var(--ink); animation: tzBob 1.6s ease-in-out infinite; animation-delay: calc(var(--i, 0) * 0.2s); }
+.pit-toon .tz-qmini:nth-child(2) { animation-delay: 0.2s; } .pit-toon .tz-qmini:nth-child(3) { animation-delay: 0.4s; } .pit-toon .tz-qmini:nth-child(4) { animation-delay: 0.6s; }
+.pit-toon .tz-qmini b { font-family: var(--tz-font); font-weight: 900; font-size: 5.5vmin; color: #fff; -webkit-text-stroke: 0.06em var(--ink); paint-order: stroke fill; }
+.pit-toon .tz-bubble { position: relative; flex: 0 1 46%; background: #fff; color: var(--ink); border: 0.7vmin solid var(--ink); border-radius: 4vmin;
+  padding: 2.6vmin 3vmin; box-shadow: 0 1vmin 0 rgba(0,0,0,0.35); }
+.pit-toon .tz-bubble::before { content: ''; position: absolute; left: -2.2vmin; top: calc(50% - 1.8vmin); width: 3.2vmin; height: 3.2vmin; background: #fff;
+  border-left: 0.7vmin solid var(--ink); border-bottom: 0.7vmin solid var(--ink); transform: rotate(45deg); }
+.pit-toon .tz-bubble p { margin: 0; font-weight: 900; font-size: clamp(18px, 3.6vmin, 48px); line-height: 1.22; }
+
+/* ---------------- riquadri dal vivo ---------------- */
+.pit-toon .tz-minis { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 1.8vmin; }
+.pit-toon .tz-minis.n1 { grid-template-columns: minmax(0, 1fr); width: min(100%, 110vmin); align-self: center; }
+.pit-toon .tz-minis.n5, .pit-toon .tz-minis.n6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pit-toon .tz-minis.n7, .pit-toon .tz-minis.n8 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pit-toon .tz-tile { position: relative; min-height: 0; display: flex; flex-direction: column; background: var(--cream); border: 0.6vmin solid var(--ink);
+  border-radius: 2.6vmin; overflow: hidden; box-shadow: 0 0.8vmin 0 rgba(0,0,0,0.4); }
+.pit-toon .tz-name { display: flex; align-items: center; gap: 1vmin; padding: 0.6vmin 1.4vmin; background: var(--c); border-bottom: 0.5vmin solid var(--ink);
+  font-family: var(--tz-font); font-weight: 900; color: #fff; font-size: clamp(16px, 3.2vmin, 44px); line-height: 1.1;
+  -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill; }
+.pit-toon .tz-name i { background: #fff; color: var(--ink); text-shadow: none; -webkit-text-stroke: 0; font-size: 0.7em; }
+.pit-toon .tz-name span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pit-toon .tz-art { position: relative; flex: 1; min-height: 0; padding: 0.8vmin 1.2vmin; background: linear-gradient(180deg, #d9f1ff, #fff8ea 75%); }
+.pit-toon .tz-name span { flex: 1; min-width: 0; }
+.pit-toon .tz-lab { flex: none; background: var(--ink); color: #fff; font-family: 'Nunito', sans-serif; font-weight: 900; font-size: 0.78em; -webkit-text-stroke: 0;
+  padding: 0.1vmin 1.2vmin; border-radius: 99px; box-shadow: 0 0 0 0.3vmin #fff; white-space: nowrap; }
+.pit-toon .tz-lab:empty { display: none; }
+.pit-toon .tz-tile.done:not(.out) { box-shadow: 0 0 0 0.7vmin #2ee66b, 0 0.8vmin 0 rgba(0,0,0,0.4); }
+.pit-toon .tz-tile.done:not(.out) .tz-lab { background: #13893f; }
+.pit-toon .tz-tile.out .tz-art { filter: grayscale(0.85) brightness(0.9); }
+.pit-toon .tz-stamp { display: none; position: absolute; left: 50%; top: 55%; transform: translate(-50%, -50%) rotate(-10deg); font-family: var(--tz-font); font-weight: 900;
+  font-size: clamp(22px, 5.6vmin, 70px); color: #fff; padding: 0.2vmin 2vmin; border-radius: 1.4vmin; border: 0.6vmin solid var(--ink); background: #e8322b;
+  -webkit-text-stroke: 0.05em var(--ink); paint-order: stroke fill; box-shadow: 0 0.6vmin 0 var(--ink); white-space: nowrap; animation: tzStamp 0.45s cubic-bezier(.3,1.6,.5,1) both; }
+.pit-toon .tz-stamp.fin { background: #2ec46b; }
+.pit-toon .tz-tile.out .tz-stamp.out { display: block; }
+.pit-toon .tz-tile.done:not(.out) .tz-stamp.fin { display: block; }
+
+/* pallone */
+.pit-toon .tz-bl { transform-origin: 150px 106px; transform: scale(var(--s, 0.3)); transition: transform 0.15s cubic-bezier(.3,1.5,.5,1); }
+.pit-toon .tz-blw { transform-origin: 150px 106px; }
+.pit-toon .hot .tz-blw { animation: tzWobble 0.16s linear infinite; }
+.pit-toon .tz-ph { animation: none; }
+.pit-toon .busy .tz-ph { animation: tzPump 0.42s ease-in-out infinite; }
+.pit-toon .tz-sweat { display: none; }
+.pit-toon .hot .tz-sweat { display: inline; animation: tzBlink 0.5s steps(2) infinite; }
+.pit-toon .tz-pop { display: none; }
+.pit-toon .g-pallone.done .tz-pop, .pit-toon .g-lattina.done .tz-pop { display: inline; transform-box: fill-box; transform-origin: center; animation: tzBurst 0.5s cubic-bezier(.3,1.7,.5,1) both; }
+.pit-toon .g-pallone.done .tz-bl, .pit-toon .g-pallone.done .tz-shd { display: none; }
+
+/* lattina */
+.pit-toon .tz-can { transform-origin: 120px 112px; }
+.pit-toon .l1 .tz-can { animation: tzShake 0.5s ease-in-out infinite; }
+.pit-toon .l2 .tz-can { animation: tzShake 0.28s ease-in-out infinite; }
+.pit-toon .l3 .tz-can { animation: tzShakeBig 0.16s linear infinite; }
+.pit-toon .tz-foam { transform-origin: 120px 36px; transform: scale(var(--p, 0)); transition: transform 0.2s cubic-bezier(.3,1.5,.5,1); }
+.pit-toon .tz-mfill { transform-origin: 195px 100px; transform: scaleY(var(--p, 0)); transition: transform 0.2s; }
+.pit-toon .tz-drops { display: none; }
+.pit-toon .l2 .tz-drops, .pit-toon .l3 .tz-drops, .pit-toon .g-lattina.done .tz-drops { display: inline; }
+.pit-toon .tz-drop { fill: #cdeeff; stroke: var(--ink); stroke-width: 2px; animation: tzSpray 0.6s ease-out infinite; }
+.pit-toon .g-lattina.done .tz-foam { transform: scale(1.35); }
+.pit-toon .g-lattina.done .tz-can { animation: none; }
+
+/* barra */
+.pit-toon .tz-gz { transform-origin: 120px 65px; transform: scaleX(var(--h, 0.2)); }
+.pit-toon .tz-gz2 { transform-origin: 120px 65px; transform: scaleX(calc(var(--h, 0.2) * 0.3)); }
+.pit-toon .tz-cur { transform: translateX(calc(var(--cx, 0) * 106px)); transition: transform 0.1s linear; }
+.pit-toon .demo .tz-cur { animation: tzSwing 1.6s ease-in-out infinite alternate; transition: none; }
+
+/* labirinto */
+.pit-toon .g-labirinto .tz-art { background: #ffe4a8; }
+.pit-toon .tz-ball { transition: transform 0.1s linear; }
+.pit-toon .g-labirinto.done .tz-ball { animation: tzSpinIn 0.6s ease-in both; transform-box: fill-box; }
+
+/* patatine */
+.pit-toon .g-patatine .tz-art, .pit-toon .tz-demo.g-patatine {
+  background: repeating-conic-gradient(#ffdede 0 25%, #fff8ea 0 50%) 0 0 / 5vmin 5vmin; }
+.pit-toon .tz-chip > g { display: none; }
+.pit-toon .tz-chip.good > .cg, .pit-toon .tz-chip.bad > .cb { display: inline; transform-box: fill-box; transform-origin: center bottom; }
+.pit-toon .tz-chip.good > .cg { animation: tzJump 0.4s cubic-bezier(.3,1.7,.5,1) both; }
+.pit-toon .tz-chip.bad > .cb { animation: tzJumpBad 0.4s cubic-bezier(.3,1.7,.5,1) both; }
+.pit-toon .tz-smoke { animation: tzSmoke 0.9s ease-in-out infinite; }
+.pit-toon .demo .tz-chip:nth-child(n) > .cg { display: inline; animation: tzHop 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center bottom; }
+.pit-toon .demo g:nth-of-type(2n) .tz-chip > .cg { animation-delay: 0.3s; }
+.pit-toon .demo g:nth-of-type(3n) .tz-chip > .cg { display: none; }
+.pit-toon .demo g:nth-of-type(3n) .tz-chip > .cb { display: inline; }
+
+/* più o meno */
+.pit-toon .flip .tz-card { transform-box: fill-box; transform-origin: center; animation: tzFlip 0.35s cubic-bezier(.3,1.4,.5,1) both; }
+.pit-toon .hotstreak .tz-streak { fill: #e8322b; }
+.pit-toon .g-piumeno .tz-art { background: linear-gradient(180deg, #2a8a52, #1f6b3d); }
+.pit-toon .tz-serie { fill: #fff; stroke: var(--ink); stroke-width: 3px; paint-order: stroke; }
+
+/* ---------------- semaforo ---------------- */
+.pit-toon .tz-sem { display: flex; gap: 4vmin; align-items: center; justify-content: center; flex: 1; min-height: 0; }
+.pit-toon .tz-light { flex: none; height: min(100%, 52vmin); display: flex; flex-direction: column; align-items: center; gap: 1vmin; }
+.pit-toon .tz-light .tz-svg { height: calc(100% - 6vmin); width: auto; }
+.pit-toon .tz-lcap { font-family: var(--tz-font); font-weight: 900; font-size: clamp(16px, 3.4vmin, 44px); color: #fff; -webkit-text-stroke: 0.06em var(--ink); paint-order: stroke fill; }
+.pit-toon .tz-light.green .tz-lcap { color: #2ee66b; animation: tzThrob 0.35s ease-in-out infinite; }
+.pit-toon .tz-light.red .tz-lcap { color: #ff6b5e; }
+.pit-toon .tz-halo { transform-box: fill-box; transform-origin: center; animation: tzHalo 0.7s ease-in-out infinite alternate; }
+.pit-toon .tz-duels { flex: 1; max-width: 120vmin; display: grid; gap: 2vmin; }
+.pit-toon .tz-duel { position: relative; display: grid; grid-template-columns: 1fr auto 1fr; gap: 2vmin; align-items: center; padding: 3.4vmin 2vmin 1.6vmin;
+  background: #f7d9a2; border: 0.6vmin solid var(--ink); border-radius: 2.4vmin; box-shadow: 0 0.8vmin 0 rgba(0,0,0,0.4);
+  background-image: repeating-linear-gradient(90deg, rgba(122,75,38,0.12) 0 2px, transparent 2px 22px); }
+.pit-toon .tz-dk { position: absolute; top: -0.4vmin; left: 50%; transform: translate(-50%, -50%) rotate(-2deg); background: #7a4b26; color: #ffd400; border: 0.45vmin solid var(--ink);
+  border-radius: 1vmin; padding: 0.2vmin 1.6vmin; font-family: var(--tz-font); font-weight: 900; font-size: clamp(12px, 2.2vmin, 28px); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.pit-toon .tz-dp { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.4vmin; padding: 1vmin; border-radius: 1.6vmin; border-bottom: 0.9vmin solid var(--c); background: rgba(255,255,255,0.55); }
+.pit-toon .tz-dp i { font-size: clamp(16px, 3.4vmin, 44px); }
+.pit-toon .tz-dp b { font-weight: 900; color: var(--ink); font-size: clamp(18px, 3.4vmin, 44px); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pit-toon .tz-dp span { font-family: var(--tz-font); font-weight: 900; color: #ffb000; letter-spacing: 0.1em; font-size: clamp(16px, 3vmin, 40px); -webkit-text-stroke: 0.04em var(--ink); paint-order: stroke fill; min-height: 1.2em; }
+.pit-toon .tz-dp span i.st { font-style: normal; }
+.pit-toon .tz-dp span i.st.off { opacity: 0.25; }
+.pit-toon .tz-dp.win { background: #b8f5cc; animation: tzPopIn 0.4s cubic-bezier(.3,1.6,.5,1) both; }
+.pit-toon .tz-dp.lose { opacity: 0.55; }
+.pit-toon .tz-dp em { position: absolute; top: -1.4vmin; right: -1vmin; transform: rotate(10deg); background: #2ec46b; color: #fff; font-style: normal; font-family: var(--tz-font); font-weight: 900;
+  font-size: clamp(11px, 2vmin, 26px); padding: 0.2vmin 1vmin; border-radius: 1vmin; border: 0.4vmin solid var(--ink); }
+.pit-toon .tz-vs b { display: flex; align-items: center; justify-content: center; width: 8vmin; height: 8vmin; font-family: var(--tz-font); font-weight: 900; font-size: 3.4vmin; color: #fff;
+  background: #e8322b; border: 0.5vmin solid var(--ink); clip-path: polygon(50% 0, 62% 30%, 100% 22%, 72% 52%, 92% 100%, 50% 72%, 8% 100%, 28% 52%, 0 22%, 38% 30%); -webkit-text-stroke: 0.05em var(--ink); paint-order: stroke fill; }
+.pit-toon .tz-bye { display: flex; align-items: center; justify-content: center; gap: 1vmin; color: #fff; font-weight: 900; font-size: clamp(16px, 2.8vmin, 36px); }
+
+/* ---------------- quiz ---------------- */
+.pit-toon .tz-quiz { display: flex; flex-direction: column; gap: 2vmin; }
+.pit-toon .tz-qcard { position: relative; background: #fff; color: var(--ink); border: 0.7vmin solid var(--ink); border-radius: 3vmin; padding: 3vmin 3vmin 2.2vmin; box-shadow: 0 1vmin 0 rgba(0,0,0,0.35); }
+.pit-toon .tz-qcat { position: absolute; top: 0; left: 3vmin; transform: translateY(-55%) rotate(-2deg); background: #ff4fa3; color: #fff; border: 0.45vmin solid var(--ink); border-radius: 99px;
+  padding: 0.2vmin 1.6vmin; font-family: var(--tz-font); font-weight: 900; font-size: clamp(12px, 2.2vmin, 28px); text-transform: uppercase; letter-spacing: 0.06em; }
+.pit-toon .tz-qq { font-weight: 900; font-size: clamp(22px, 4.6vmin, 60px); line-height: 1.15; }
+.pit-toon .tz-qa { display: grid; grid-template-columns: 1fr 1fr; gap: 1.8vmin; }
+.pit-toon .tz-ans { position: relative; display: flex; align-items: center; gap: 1.6vmin; min-height: 11vmin; padding: 1vmin 1.6vmin; background: var(--c); color: #fff; border: 0.6vmin solid var(--ink);
+  border-radius: 2vmin; box-shadow: 0 0.8vmin 0 var(--ink); font-weight: 900; font-size: clamp(18px, 3.4vmin, 44px); line-height: 1.1; text-shadow: 0 0.12em 0 rgba(0,0,0,0.35);
+  animation: tzPopIn 0.4s cubic-bezier(.3,1.5,.5,1) both; animation-delay: calc(var(--i, 0) * 0.08s); }
+.pit-toon .tz-ans b { flex: none; display: flex; align-items: center; justify-content: center; width: 1.7em; height: 1.7em; border-radius: 50%; background: #fff; color: var(--ink);
+  border: 0.45vmin solid var(--ink); font-family: var(--tz-font); text-shadow: none; }
+.pit-toon .tz-ans span { flex: 1; min-width: 0; }
+.pit-toon .tz-ans em { display: flex; }
+.pit-toon .tz-ans.no { opacity: 0.38; filter: grayscale(0.6); animation: none; }
+.pit-toon .tz-ans.ok { background: #2ec46b; animation: tzWin 0.6s cubic-bezier(.3,1.6,.5,1) both; z-index: 1; }
+.pit-toon .tz-ans strong { position: absolute; top: -2.4vmin; right: -1.6vmin; width: 6vmin; height: 6vmin; display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  background: #ffd400; color: var(--ink); border: 0.5vmin solid var(--ink); font-size: 3.6vmin; text-shadow: none; transform: rotate(12deg); }
+
+/* ---------------- porta segreta ---------------- */
+.pit-toon .tz-doors { flex: 0 1 56vmin; min-height: 0; display: flex; gap: 5vmin; justify-content: center; align-items: stretch; }
+.pit-toon .tz-door { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1vmin; height: 100%; aspect-ratio: 120 / 210; }
+.pit-toon .tz-door .tz-svg { flex: 1; min-height: 0; height: auto; filter: drop-shadow(0 0.8vmin 0 rgba(0,0,0,0.4)); }
+.pit-toon .tz-door:not(.ok):not(.no) .tz-leaf, .pit-toon .tz-demo .tz-leaf { transform-box: fill-box; transform-origin: center bottom; animation: tzDoorIdle 2.2s ease-in-out infinite; }
+.pit-toon .tz-door:nth-child(2) .tz-leaf { animation-delay: 0.35s; } .pit-toon .tz-door:nth-child(3) .tz-leaf { animation-delay: 0.7s; }
+.pit-toon .tz-door.ok .tz-leaf { transform-origin: 16px 90px; animation: tzOpen 0.6s cubic-bezier(.3,1.3,.5,1) both; }
+.pit-toon .tz-door.no { opacity: 0.6; }
+.pit-toon .tz-rays { transform-origin: 60px 88px; animation: tzSpin 6s linear infinite; }
+.pit-toon .tz-picks .tz-dot { font-size: clamp(16px, 3.4vmin, 44px); }
+.pit-toon .tz-picks { min-height: 5vmin; display: flex; flex-wrap: wrap; justify-content: center; }
+
+/* ---------------- righe (spareggio e giochi senza disegno) ---------------- */
+.pit-toon .tz-help { margin: 0; text-align: center; font-family: var(--tz-font); font-weight: 900; font-size: clamp(22px, 5vmin, 64px); color: #ffd400;
+  -webkit-text-stroke: 0.05em var(--ink); paint-order: stroke fill; text-shadow: 0 0.08em 0 var(--ink); }
+.pit-toon .tz-help.go { animation: tzThrob 0.4s ease-in-out infinite; }
+.pit-toon .tz-rows { display: grid; gap: 1.6vmin; }
+.pit-toon .tz-row { display: grid; grid-template-columns: minmax(0, 26%) 1fr auto; gap: 2vmin; align-items: center; background: var(--cream); color: var(--ink);
+  border: 0.55vmin solid var(--ink); border-radius: 2vmin; padding: 1vmin 1.6vmin; box-shadow: 0 0.7vmin 0 rgba(0,0,0,0.35); }
+.pit-toon .tz-row.out { opacity: 0.5; }
+.pit-toon .tz-rn { display: flex; align-items: center; gap: 1vmin; font-weight: 900; font-size: clamp(16px, 3.2vmin, 42px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pit-toon .tz-rbar { height: 4.6vmin; background: #e3e0f0; border: 0.5vmin solid var(--ink); border-radius: 99px; overflow: hidden; }
+.pit-toon .tz-rbar i { display: block; height: 100%; width: var(--w, 0%); border-right: 0.5vmin solid var(--ink); border-radius: 99px; transition: width 0.15s linear;
+  background: repeating-linear-gradient(-45deg, rgba(255,255,255,0.3) 0 1vmin, rgba(255,255,255,0) 1vmin 2vmin), var(--c); }
+.pit-toon .tz-rl { font-family: var(--tz-font); font-weight: 900; font-size: clamp(16px, 3vmin, 40px); min-width: 4em; text-align: right; }
+
+/* ---------------- classifica e premi ---------------- */
+.pit-toon .tz-res { display: grid; gap: 1.6vmin; }
+.pit-toon .tz-pr { position: relative; display: grid; grid-template-columns: auto minmax(0, 0.9fr) minmax(0, 1.3fr); gap: 2.4vmin; align-items: center;
+  background: var(--cream); color: var(--ink); border: 0.6vmin solid var(--ink); border-left: 2vmin solid var(--c); border-radius: 2.4vmin; padding: 0.8vmin 2vmin 0.8vmin 1.2vmin;
+  box-shadow: 0 0.8vmin 0 rgba(0,0,0,0.4); animation: tzSlideIn 0.5s cubic-bezier(.3,1.4,.5,1) both; animation-delay: calc(var(--i, 0) * 0.15s); }
+.pit-toon .tz-pr.p1 { background: linear-gradient(90deg, #fff1a6, #fff8ea 60%); padding-top: 1.4vmin; padding-bottom: 1.4vmin; transform-origin: left center; }
+.pit-toon .tz-medal { width: 8vmin; height: 9.5vmin; margin-top: -1vmin; }
+.pit-toon .tz-pr.p1 .tz-medal { width: 10vmin; height: 12vmin; animation: tzBob 1.6s ease-in-out infinite; }
+.pit-toon .tz-prn { display: flex; flex-direction: column; min-width: 0; }
+.pit-toon .tz-prn b { display: flex; align-items: center; gap: 1vmin; font-family: var(--tz-font); font-weight: 900; font-size: clamp(18px, 3.6vmin, 48px); line-height: 1.1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pit-toon .tz-pr.p1 .tz-prn b { font-size: clamp(22px, 4.6vmin, 60px); }
+.pit-toon .tz-prn small { font-weight: 900; font-size: clamp(13px, 2.2vmin, 28px); color: #5b5675; }
+.pit-toon .tz-prize { display: flex; align-items: center; gap: 1.2vmin; font-weight: 900; font-size: clamp(15px, 2.7vmin, 36px); line-height: 1.15;
+  background: #fff; border: 0.45vmin dashed var(--ink); border-radius: 1.6vmin; padding: 0.8vmin 1.4vmin; }
+.pit-toon .tz-prize .tz-gift { flex: none; width: 4.4vmin; height: 4.4vmin; }
+.pit-toon .tz-pr.p1 .tz-prize { background: #ffe14d; border-style: solid; }
+.pit-toon .tz-stars { position: absolute; inset: 0; pointer-events: none; }
+.pit-toon .tz-stars i { position: absolute; width: 4vmin; height: 4vmin; animation: tzTwinkle 1.4s ease-in-out infinite; }
+.pit-toon .tz-stars .s0 { left: 0.4vmin; top: -2.2vmin; }
+.pit-toon .tz-stars .s1 { left: 9vmin; bottom: -1.8vmin; width: 3vmin; height: 3vmin; animation-delay: 0.3s; }
+.pit-toon .tz-stars .s2 { right: 1vmin; top: -2.4vmin; animation-delay: 0.6s; }
+.pit-toon .tz-stars .s3 { right: 30%; top: -2vmin; width: 3vmin; height: 3vmin; animation-delay: 0.9s; }
+.pit-toon .tz-stars .s4 { left: 40%; bottom: -2vmin; width: 3.2vmin; height: 3.2vmin; animation-delay: 0.45s; }
+
+/* ---------------- 3-2-1 grande ---------------- */
+.pit-toon .tz-big { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1.4vmin; text-align: center; }
+.pit-toon .tz-burst { position: absolute; left: 50%; top: 42%; width: 62vmin; height: 62vmin; margin: -31vmin 0 0 -31vmin; border-radius: 50%;
+  background: repeating-conic-gradient(rgba(255,212,0,0.28) 0deg 12deg, rgba(255,212,0,0) 12deg 24deg);
+  -webkit-mask: radial-gradient(circle, #000 35%, transparent 70%); mask: radial-gradient(circle, #000 35%, transparent 70%); animation: tzSpin 10s linear infinite; }
+.pit-toon .tz-big.go .tz-burst { background: repeating-conic-gradient(rgba(46,230,107,0.3) 0deg 12deg, rgba(46,230,107,0) 12deg 24deg); }
+.pit-toon .tz-bnum { position: relative; }
+.pit-toon .tz-bnum b { display: block; font-family: var(--tz-font); font-weight: 900; font-size: 32vmin; line-height: 1; color: #ffd400;
+  -webkit-text-stroke: 0.04em var(--ink); paint-order: stroke fill; text-shadow: 0 0.05em 0 #e8322b, 0 0.09em 0 var(--ink); animation: tzCount 1s cubic-bezier(.3,1.6,.5,1) both; }
+.pit-toon .tz-big.go .tz-bnum b { color: #2ee66b; text-shadow: 0 0.05em 0 #13893f, 0 0.09em 0 var(--ink); }
+.pit-toon .tz-bnum b.via { font-size: 24vmin; color: #2ee66b; text-shadow: 0 0.05em 0 #13893f, 0 0.09em 0 var(--ink); }
+.pit-toon .tz-blabel { position: relative; display: flex; align-items: center; gap: 1.4vmin; font-family: var(--tz-font); font-weight: 900; font-size: clamp(20px, 4.4vmin, 60px);
+  color: var(--ink); background: #fff; border: 0.6vmin solid var(--ink); border-radius: 99px; padding: 0.6vmin 3vmin 0.6vmin 1vmin; box-shadow: 0 0.8vmin 0 rgba(0,0,0,0.4); }
+.pit-toon .tz-big.go .tz-blabel { padding-left: 3vmin; }
+.pit-toon .tz-bico { width: 6vmin; height: 6vmin; }
+
+/* ---------------- animazioni ---------------- */
+@keyframes tzBob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-0.8vmin) rotate(3deg); } }
+@keyframes tzThrob { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+@keyframes tzPopIn { 0% { transform: scale(0.3); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes tzStamp { 0% { transform: translate(-50%, -50%) rotate(-10deg) scale(2.4); opacity: 0; } 100% { transform: translate(-50%, -50%) rotate(-10deg) scale(1); opacity: 1; } }
+@keyframes tzWobble { 0% { transform: rotate(-3deg) scale(1.02, 0.98); } 50% { transform: rotate(3deg) scale(0.98, 1.03); } 100% { transform: rotate(-3deg) scale(1.02, 0.98); } }
+@keyframes tzPump { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(22px); } }
+@keyframes tzBlink { 0% { opacity: 1; } 100% { opacity: 0.2; } }
+@keyframes tzBurst { 0% { transform: scale(0) rotate(-30deg); } 100% { transform: scale(1) rotate(0); } }
+@keyframes tzShake { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+@keyframes tzShakeBig { 0% { transform: rotate(-11deg) translateX(-3px); } 50% { transform: rotate(11deg) translateX(3px); } 100% { transform: rotate(-11deg) translateX(-3px); } }
+@keyframes tzSpray { 0% { transform: translate(0, 0); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+@keyframes tzSwing { from { transform: translateX(-100px); } to { transform: translateX(100px); } }
+@keyframes tzSpinIn { 0% { transform: scale(1) rotate(0); } 100% { transform: scale(0.4) rotate(360deg); opacity: 0.6; } }
+@keyframes tzJump { 0% { transform: translateY(14px) scale(0.2); } 60% { transform: translateY(-8px) scale(1.15); } 100% { transform: translateY(0) scale(1); } }
+@keyframes tzJumpBad { 0% { transform: translateY(14px) scale(0.2) rotate(-20deg); } 60% { transform: translateY(-6px) scale(1.1) rotate(8deg); } 100% { transform: translateY(0) scale(1) rotate(0); } }
+@keyframes tzHop { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-8px) scale(1.08, 0.94); } }
+@keyframes tzSmoke { 0% { transform: translateY(2px); opacity: 0.2; } 50% { opacity: 0.9; } 100% { transform: translateY(-5px); opacity: 0; } }
+@keyframes tzFlip { 0% { transform: scaleX(0) rotate(-8deg); } 100% { transform: scaleX(1) rotate(0); } }
+@keyframes tzHalo { from { transform: scale(0.9); opacity: 0.25; } to { transform: scale(1.12); opacity: 0.5; } }
+@keyframes tzWin { 0% { transform: scale(1); } 40% { transform: scale(1.08) rotate(-1.5deg); } 100% { transform: scale(1.03); } }
+@keyframes tzDoorIdle { 0%, 80%, 100% { transform: rotate(0); } 85% { transform: rotate(-1.5deg); } 90% { transform: rotate(1.5deg); } 95% { transform: rotate(-1deg); } }
+@keyframes tzOpen { 0% { transform: scaleX(1) skewY(0); } 100% { transform: scaleX(0.2) skewY(-10deg); } }
+@keyframes tzSpin { to { transform: rotate(360deg); } }
+@keyframes tzSlideIn { 0% { transform: translateX(-8vmin) scale(0.9); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes tzTwinkle { 0%, 100% { transform: scale(0.7) rotate(0); opacity: 0.6; } 50% { transform: scale(1.15) rotate(25deg); opacity: 1; } }
+@keyframes tzCount { 0% { transform: scale(1.6); opacity: 0; } 25% { transform: scale(0.92); opacity: 1; } 45% { transform: scale(1.04); } 100% { transform: scale(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pit-toon *, .pit-toon *::before, .pit-toon *::after { animation-duration: 0.01s !important; animation-iteration-count: 1 !important; }
+}

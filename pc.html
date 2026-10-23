@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/mg-tv.css">
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
@@ -28,7 +29,7 @@
   <div class="panel">
     <div>
       <h1 class="logo">MANCAVE<br>KART</h1>
-      <p class="sub" id="subtitle">Livello 1 · pista di prova</p>
+      <p class="sub" id="subtitle">Corse in kart con le carte e i minigiochi</p>
       <div class="qr" id="qr">Preparo il QR…</div>
       <p class="hint" style="margin:8px 0 0">Scansiona col telefono per entrare da questo schermo</p>
       <div style="margin-top:14px" class="label">Stanza</div>
@@ -41,6 +42,7 @@
       <div class="players" id="players"></div>
       <div class="settings">
         <div><span class="label">Pista</span><div class="seg" id="track-sel"></div></div>
+        <div><span class="label">Ora</span><div class="seg" id="night-sel"></div></div>
         <div><span class="label">Giri</span><div class="seg" id="laps"></div></div>
         <div><span class="label">Questo schermo</span><div class="seg" id="layout"></div></div>
         <div><span class="label">Altri monitor</span><button class="btn ghost" id="open-screen" type="button">+ Apri altro monitor</button></div>

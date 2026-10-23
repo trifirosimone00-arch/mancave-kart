@@ -298,9 +298,6 @@ button { font-family: inherit; cursor: pointer; }
 .mv-ball.pop { background: transparent; border: 4px dashed var(--yellow); }
 .mv-can { width: 6vmin; height: 10vmin; border: 4px solid #e8ecf5; border-radius: 10px; position: relative; overflow: hidden; background: #2b3256; }
 .mv-can i { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#fff6c4, #ffd400); transition: height 0.12s; }
-.mv-sink { position: relative; height: 7vmin; border-radius: 4vmin; background: linear-gradient(#bfe6ff, #6fbbe8); border: 3px solid #e8ecf5; overflow: hidden; }
-.mv-sink i { position: absolute; top: 50%; transform: translateY(-55%); font-style: normal; font-size: 5vmin; transition: left 0.12s linear; }
-.mv-sink em { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-style: normal; font-size: 3.6vmin; }
 .mv-maze { width: 100%; height: 14vmin; }
 .mv-maze circle:last-child { transition: cx 0.1s linear, cy 0.1s linear; }
 .mv-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; height: 12vmin; }
@@ -315,3 +312,63 @@ button { font-family: inherit; cursor: pointer; }
 #podium { background: linear-gradient(180deg, rgba(10,13,26,0) 0%, rgba(10,13,26,0.35) 60%, rgba(10,13,26,0.7) 100%); backdrop-filter: none; }
 #podium .panel { background: rgba(18,22,42,0.78); }
 #podium::before { content: 'REPLAY'; position: fixed; left: 24px; top: 20px; font-family: 'Bungee', sans-serif; color: #fff; background: var(--red); padding: 4px 12px; border-radius: 8px; letter-spacing: 2px; }
+
+/* effetti delle carte sullo schermo di chi viene colpito */
+.view.racing > .v-police, .view.racing > .v-rewind, .view.racing > .v-call, .view.racing > .v-big { display: block; }
+.v-big { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font-family: 'Bungee', 'Arial Black', sans-serif; font-size: clamp(30px, 11vmin, 130px);
+  color: #fff; -webkit-text-stroke: 0.05em #1a1a1a; text-shadow: 0 0.07em 0 #1a1a1a, 0 0 30px rgba(0,0,0,0.5); opacity: 0; pointer-events: none; }
+.v-big.show { animation: bigIn 1.5s ease-out forwards; }
+@keyframes bigIn { 0% { opacity: 0; transform: scale(2.2) rotate(-6deg); } 12% { opacity: 1; transform: scale(0.92) rotate(2deg); } 20% { transform: scale(1.05) rotate(-1deg); } 26% { transform: scale(1) rotate(0); } 80% { opacity: 1; } 100% { opacity: 0; transform: scale(1.1); } }
+.v-big.k-missile, .v-big.k-oil { color: #ff5a3c; }
+.v-big.k-drunk { color: #ffc93a; }
+.v-big.k-invert, .v-big.k-mini { color: #c792ff; }
+.v-big.k-handbrake { color: #ffd000; }
+.v-big.k-slow { color: #ff4d6d; }
+.v-big.k-call { color: #39e07a; }
+.v-big.k-police { color: #5aa8ff; }
+.v-big.k-remote, .v-big.k-swap, .v-big.k-thief { color: #9fe3ff; }
+.v-police { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.v-police.show { opacity: 1; animation: police 0.5s steps(1) infinite; }
+@keyframes police { 0% { box-shadow: inset 0 0 0 1.2vmin #ff2340, inset 0 0 8vmin rgba(255,35,64,0.55); } 50% { box-shadow: inset 0 0 0 1.2vmin #2a6bff, inset 0 0 8vmin rgba(42,107,255,0.55); } }
+.v-rewind { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; opacity: 0; transition: opacity 0.2s; }
+.v-rewind.show { opacity: 1; }
+.v-rewind b { display: block; font-size: clamp(60px, 26vmin, 320px); line-height: 1; filter: drop-shadow(0 6px 0 rgba(0,0,0,0.5)); animation: rewind 0.8s ease-in-out infinite; }
+.v-rewind span { font-family: 'Bungee', sans-serif; color: #fff; font-size: clamp(14px, 3.4vmin, 40px); -webkit-text-stroke: 0.05em #1a1a1a; }
+@keyframes rewind { 0%, 100% { transform: scale(1); opacity: 0.85; } 50% { transform: scale(1.12); opacity: 1; } }
+.v-call { position: absolute; right: 3%; top: 50%; width: clamp(150px, 26vmin, 300px); transform: translate(130%, -50%); transition: transform 0.25s ease-out; pointer-events: none;
+  background: linear-gradient(#2b2f3a, #12141a); border-radius: 26px; padding: 2.4vmin 1.6vmin; color: #fff; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 3px solid #3a3f4c; }
+.v-call.show { transform: translate(0, -50%); animation: callShake 0.25s ease-in-out infinite; }
+@keyframes callShake { 0%, 100% { margin-top: 0; } 50% { margin-top: -4px; } }
+.vc-top { font-size: clamp(10px, 1.8vmin, 18px); opacity: 0.8; }
+.vc-name { font-weight: 900; font-size: clamp(18px, 4vmin, 44px); margin: 0.4em 0 0.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vc-sub { font-size: clamp(10px, 1.6vmin, 16px); color: #ffd400; }
+.vc-btns { display: flex; justify-content: space-around; margin-top: 1.6vmin; }
+.vc-btns i { font-style: normal; width: clamp(34px, 7vmin, 70px); height: clamp(34px, 7vmin, 70px); border-radius: 50%; display: grid; place-items: center; font-size: clamp(16px, 3.4vmin, 34px); }
+.vc-btns .no { background: #ff3b30; }
+.vc-btns .yes { background: #34c759; }
+
+/* scritte più grandi, leggibili dal divano */
+.v-lap { font-size: clamp(20px, 6vmin, 62px); }
+.v-time { font-size: clamp(15px, 4vmin, 40px); }
+#hud[data-n="4"] .v-lap { font-size: clamp(16px, 4.4vmin, 44px); }
+#hud[data-n="4"] .v-time { font-size: clamp(13px, 3vmin, 30px); }
+.vr { font-size: clamp(13px, 2.8vmin, 28px); }
+.v-meters > div { font-size: clamp(13px, 2.7vmin, 26px); padding: 4px 12px; }
+.v-meters { top: calc(3.5% + clamp(60px, 16vmin, 150px)); }
+#hud[data-n="2"] .v-meters, #hud[data-n="4"] .v-meters { top: calc(3.5% + clamp(48px, 11vmin, 100px)); }
+.v-fx { font-size: clamp(15px, 3.4vmin, 32px); }
+.feed div { font-size: clamp(16px, 3.1vmin, 30px); }
+.v-hit { font-size: clamp(22px, 7vmin, 76px); }
+
+/* selfie dei piloti */
+.vr i.ph { width: 1.6em; height: 1.6em; background-size: cover; background-position: center; border-width: 2px; }
+.stand .ball.ph { width: 96px; height: 96px; background-size: cover; background-position: center; border: 5px solid #fff; }
+
+/* lobby più bella: pannello di vetro, kart veri nelle schede dei piloti */
+#lobby .panel { background: linear-gradient(160deg, rgba(30,36,70,0.86), rgba(14,17,34,0.9)); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 2px solid rgba(255,255,255,0.12); }
+.pcard { background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)), var(--ink-2); box-shadow: 0 6px 18px rgba(0,0,0,0.3); transition: transform 0.2s; }
+.pcard:not(.empty) { animation: cardIn 0.35s ease-out; }
+@keyframes cardIn { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.pcard .kart.thumb { width: 108px; height: 72px; background-color: transparent; background-size: contain; background-position: center; background-repeat: no-repeat; border-radius: 0; }
+.pcard .kart.thumb::after, .pcard .kart.ph::after { display: none; }
+.pcard .kart.ph { width: 64px; height: 64px; border-radius: 50%; background-size: cover; background-position: center; border: 4px solid #fff; }

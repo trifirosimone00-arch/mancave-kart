@@ -3,6 +3,8 @@
 // manda solo il suo stato (punti, fatto/eliminato). Porta segreta, Quiz e Semaforo
 // vanno a manche decise dal PC principale.
 
+import { QUIZ, QUIZ_CATS as QUIZ_BASE_CATS } from './quiz-data.js';
+
 export const PIT_FRACTION = 0.56;        // dove si trova il pit stop nel giro
 export const PIT_INTRO = 10;             // spiegazione del minigioco (si salta col tasto SALTA)
 export const PIT_COUNT = 3;              // 3-2-1 prima di giocare
@@ -61,10 +63,6 @@ export const GAMES = {
     title: 'Labirinto', kind: 'Fisico', dur: 60, short: 30,
     help: 'Inclina il telefono per portare la pallina alla bandiera senza cadere nei buchi. Se non hai il sensore, trascina il dito.',
   },
-  regata: {
-    title: 'Regata nel lavandino', kind: 'Fisico', dur: 45, short: 30,
-    help: 'Soffia nel microfono del telefono per spingere la vela della barchetta. Senza microfono si rema toccando.',
-  },
   piumeno: {
     title: 'Più o meno', kind: 'Bluff', dur: 45, short: 30,
     help: 'Esce un numero da 1 a 100: indovina se il prossimo è più alto o più basso. Vince la serie più lunga.',
@@ -74,7 +72,7 @@ export const GAMES = {
     help: 'Manche con 3 porte: scegli una porta. Se sei l\'unico ad averla scelta prendi 1 punto.',
   },
   quiz: {
-    title: 'Quiz', kind: 'Quiz', rounds: 6, shortRounds: 3, roundTime: 9, revealTime: 3,
+    title: 'Quiz', kind: 'Quiz', rounds: 5, roundTime: 9, revealTime: 3,   // sempre 5 domande, qualunque durata
     help: 'Rispondi dal telefono. Giusta: 10 punti più un bonus se sei veloce. Sbagliata: −5.',
   },
 };
@@ -94,6 +92,10 @@ export const LAMPO = {
   barra: { title: 'Ferma la barra nel verde!', short: 'FERMA LA BARRA' },
   num:   { title: 'Tocca i numeri da 1 a 6 in ordine!', short: 'NUMERI 1-6', n: 6 },
   shake: { title: 'Scuoti il telefono (o tocca)!', short: 'SCUOTI!', n: 40 },
+  gomme:  { title: 'Cambio gomme: bulloni in ordine!', short: 'CAMBIO GOMME', wheels: 4, bolts: 3 },
+  vetro:  { title: 'Lava il parabrezza!', short: 'LAVA IL VETRO', cols: 12, rows: 6, clean: 0.9 },
+  memory: { title: 'Memory veloce: ripeti i colori!', short: 'MEMORY', n: 4 },
+  conta:  { title: 'Conta i kart!', short: 'CONTA I KART', show: 2.6 },
 };
 export const LAMPO_IDS = Object.keys(LAMPO);
 // tempo (secondi) che ci mette un computer
@@ -103,6 +105,55 @@ export function cpuLampoTime(level, R) {
 }
 // numeri della missione "num": posizioni mescolate su una griglia 3x2
 export function lampoNumbers(seed) { return shuffle([1, 2, 3, 4, 5, 6], rng(seed + 3)); }
+// "gomme": per ogni ruota i bulloni con il loro numero (1..3) e l'angolo sul cerchione
+export function lampoGomme(seed) {
+  const R = rng(seed + 11), { wheels, bolts } = LAMPO.gomme;
+  return Array.from({ length: wheels }, () => {
+    const rot = R() * 360, nums = shuffle(Array.from({ length: bolts }, (_, i) => i + 1), R);
+    return nums.map((n, i) => ({ n, ang: rot + i * 360 / bolts }));
+  });
+}
+// "vetro": sporco di ogni casella della griglia (0 = pulita, 1 = sporca), a macchie rotonde
+export function lampoVetro(seed) {
+  const R = rng(seed + 23), { cols, rows } = LAMPO.vetro;
+  const blobs = Array.from({ length: 6 + Math.floor(R() * 3) }, () => ({ x: R() * cols, y: R() * rows, r: 1.3 + R() * 1.6 }));
+  const out = [];
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const hit = blobs.some(b => Math.hypot(x + 0.5 - b.x, (y + 0.5 - b.y) * 1.3) < b.r);
+    out.push(hit ? 1 : 0);
+  }
+  // almeno un po' di sporco: se le macchie sono poche sporco una fascia in mezzo
+  if (out.filter(v => v).length < cols * rows * 0.3) for (let x = 2; x < cols - 2; x++) out[Math.floor(rows / 2) * cols + x] = out[(Math.floor(rows / 2) - 1) * cols + x] = 1;
+  return out;
+}
+// "memory": sequenza di 4 colori (indici 0..3), mai lo stesso due volte di fila
+export function lampoMemory(seed) {
+  const R = rng(seed + 31), out = [];
+  while (out.length < LAMPO.memory.n) { const c = Math.floor(R() * 4); if (c !== out[out.length - 1]) out.push(c); }
+  return out;
+}
+// "conta": scena n° round con i kart { x, y, c } (x, y in % dello spazio), colore chiesto e 4 risposte
+export const CONTA_COLORS = [
+  { id: 'rossi', hex: '#e8322b' }, { id: 'blu', hex: '#2f7bff' }, { id: 'verdi', hex: '#2ec46b' }, { id: 'gialli', hex: '#ffb000' },
+];
+export function lampoConta(seed, round = 0) {
+  const R = rng(seed + 41 + round * 1013);
+  const ask = Math.floor(R() * CONTA_COLORS.length);
+  const want = 2 + Math.floor(R() * 5);                     // da 2 a 6 kart del colore chiesto
+  const others = 5 + Math.floor(R() * 4);                   // più qualche kart di altri colori
+  const colors = [...Array(want).fill(ask), ...Array.from({ length: others }, () => (ask + 1 + Math.floor(R() * 3)) % 4)];
+  // caselle di una griglia 6x3 mescolate, così i kart non si sovrappongono
+  const cells = shuffle(Array.from({ length: 18 }, (_, i) => i), R);
+  const karts = shuffle(colors, R).map((c, i) => {
+    const cell = cells[i];
+    return { c, x: (cell % 6) * 16 + 2 + R() * 4, y: Math.floor(cell / 6) * 33 + 4 + R() * 12, flip: R() < 0.5 };
+  });
+  // risposte: la giusta più 3 numeri vicini, mescolate
+  const set = new Set([want]);
+  while (set.size < 4) { const v = want + Math.floor(R() * 7) - 3; if (v >= 1 && v !== want) set.add(v); }
+  const answers = shuffle([...set], R);
+  return { karts, ask, want, answers };
+}
 
 // stato ridotto per disegnare il gioco di ognuno sulla TV
 export function liveState(game, s) {
@@ -111,7 +162,7 @@ export function liveState(game, s) {
     case 'barra': return { c: s.v ? s.v.c : 0, h: s.v ? s.v.h : 0.2, out: s.out ? 1 : 0 };
     case 'labirinto': return { x: s.v ? s.v.x : 0.5, y: s.v ? s.v.y : 0.5 };
     case 'pallone': return { n: s.n || 0 };
-    case 'lattina': case 'regata': return { p: s.p || 0 };
+    case 'lattina': return { p: s.p || 0 };
     case 'piumeno': return { i: s.i || 0, cur: s.cur || 0 };
     case 'patatine': return { score: s.score || 0 };
   }
@@ -258,58 +309,10 @@ export function duelRound(D, ms) {
 export const DUEL_NAMES = { semi: 'Semifinale', final: 'Finale', small: 'Finalina 3° posto' };
 
 // ------------------------------------------------------------------ quiz
-export const QUIZ_CATS = ['Cultura', 'Calcio', 'Videogiochi e film', 'Mancave'];
-// a = risposta giusta (la prima), b = categoria
-export const QUIZ = [
-  ['Qual è la capitale dell\'Australia?', ['Canberra', 'Sydney', 'Melbourne', 'Perth'], 'Cultura'],
-  ['Qual è il pianeta più grande del sistema solare?', ['Giove', 'Saturno', 'Nettuno', 'Terra'], 'Cultura'],
-  ['Chi ha dipinto la Gioconda?', ['Leonardo da Vinci', 'Michelangelo', 'Raffaello', 'Caravaggio'], 'Cultura'],
-  ['Qual è il simbolo chimico dell\'oro?', ['Au', 'Ag', 'Or', 'Go'], 'Cultura'],
-  ['Qual è il fiume più lungo d\'Italia?', ['Po', 'Tevere', 'Adige', 'Arno'], 'Cultura'],
-  ['Quanti lati ha un esagono?', ['6', '5', '7', '8'], 'Cultura'],
-  ['In che anno è caduto il Muro di Berlino?', ['1989', '1991', '1985', '1979'], 'Cultura'],
-  ['Qual è la montagna più alta del mondo?', ['Everest', 'K2', 'Monte Bianco', 'Kilimangiaro'], 'Cultura'],
-  ['Chi ha scritto la Divina Commedia?', ['Dante Alighieri', 'Francesco Petrarca', 'Giovanni Boccaccio', 'Alessandro Manzoni'], 'Cultura'],
-  ['Qual è la capitale del Canada?', ['Ottawa', 'Toronto', 'Montréal', 'Vancouver'], 'Cultura'],
-  ['Quante zampe ha un ragno?', ['8', '6', '10', '12'], 'Cultura'],
-  ['Qual è l\'oceano più grande?', ['Pacifico', 'Atlantico', 'Indiano', 'Artico'], 'Cultura'],
-  ['Qual è il gas più abbondante nell\'aria?', ['Azoto', 'Ossigeno', 'Anidride carbonica', 'Argon'], 'Cultura'],
-  ['Che lingua si parla in Brasile?', ['Portoghese', 'Spagnolo', 'Brasiliano', 'Inglese'], 'Cultura'],
-  ['Bari è il capoluogo di quale regione?', ['Puglia', 'Basilicata', 'Calabria', 'Molise'], 'Cultura'],
-  ['Quanti minuti ci sono in un giorno?', ['1440', '1240', '1340', '1640'], 'Cultura'],
-  ['Qual è l\'isola più grande del Mediterraneo?', ['Sicilia', 'Sardegna', 'Cipro', 'Corsica'], 'Cultura'],
-  ['Chi ha scoperto la penicillina?', ['Alexander Fleming', 'Louis Pasteur', 'Marie Curie', 'Robert Koch'], 'Cultura'],
-  ['Quanti Mondiali ha vinto l\'Italia?', ['4', '3', '5', '2'], 'Calcio'],
-  ['In quale paese si sono giocati i Mondiali 2006?', ['Germania', 'Francia', 'Italia', 'Sudafrica'], 'Calcio'],
-  ['Chi ha vinto i Mondiali 2022?', ['Argentina', 'Francia', 'Croazia', 'Brasile'], 'Calcio'],
-  ['Quanti giocatori ha in campo una squadra?', ['11', '10', '9', '12'], 'Calcio'],
-  ['Quale squadra italiana ha vinto più Champions League?', ['Milan', 'Inter', 'Juventus', 'Roma'], 'Calcio'],
-  ['In quale stadio giocano Roma e Lazio?', ['Olimpico', 'San Siro', 'Maradona', 'Franchi'], 'Calcio'],
-  ['Come è soprannominata la Juventus?', ['Vecchia Signora', 'Il Diavolo', 'La Lupa', 'Il Biscione'], 'Calcio'],
-  ['Quanto dura una partita senza recupero?', ['90 minuti', '80 minuti', '100 minuti', '120 minuti'], 'Calcio'],
-  ['Chi ha vinto l\'Europeo giocato nel 2021?', ['Italia', 'Inghilterra', 'Spagna', 'Francia'], 'Calcio'],
-  ['A chi è intitolato lo stadio del Napoli?', ['Diego Armando Maradona', 'Pelé', 'Zico', 'Careca'], 'Calcio'],
-  ['In che ruolo giocava Gianluigi Buffon?', ['Portiere', 'Difensore', 'Centrocampista', 'Attaccante'], 'Calcio'],
-  ['Di che paese è Cristiano Ronaldo?', ['Portogallo', 'Spagna', 'Brasile', 'Argentina'], 'Calcio'],
-  ['Quanti punti vale una vittoria in Serie A?', ['3', '2', '1', '4'], 'Calcio'],
-  ['In che paese è nato Lionel Messi?', ['Argentina', 'Spagna', 'Uruguay', 'Brasile'], 'Calcio'],
-  ['Come si chiama il fratello di Mario?', ['Luigi', 'Wario', 'Toad', 'Yoshi'], 'Videogiochi e film'],
-  ['Di che colore è Sonic?', ['Blu', 'Rosso', 'Verde', 'Giallo'], 'Videogiochi e film'],
-  ['In Minecraft, quale mostro esplode?', ['Creeper', 'Zombie', 'Scheletro', 'Enderman'], 'Videogiochi e film'],
-  ['Quale azienda produce la PlayStation?', ['Sony', 'Microsoft', 'Nintendo', 'Sega'], 'Videogiochi e film'],
-  ['Qual è il Pokémon inseparabile di Ash nel cartone?', ['Pikachu', 'Charmander', 'Bulbasaur', 'Squirtle'], 'Videogiochi e film'],
-  ['Chi ha diretto Titanic (1997)?', ['James Cameron', 'Steven Spielberg', 'Christopher Nolan', 'Ridley Scott'], 'Videogiochi e film'],
-  ['In quale casa di Hogwarts è Harry Potter?', ['Grifondoro', 'Serpeverde', 'Corvonero', 'Tassorosso'], 'Videogiochi e film'],
-  ['Chi interpreta Iron Man nei film Marvel?', ['Robert Downey Jr.', 'Chris Evans', 'Chris Hemsworth', 'Mark Ruffalo'], 'Videogiochi e film'],
-  ['Come si chiama il protagonista del Re Leone?', ['Simba', 'Mufasa', 'Scar', 'Nala'], 'Videogiochi e film'],
-  ['Che lavoro fa Super Mario?', ['Idraulico', 'Muratore', 'Elettricista', 'Cuoco'], 'Videogiochi e film'],
-  ['In Star Wars, chi è il padre di Luke Skywalker?', ['Darth Vader', 'Obi-Wan Kenobi', 'Yoda', 'Han Solo'], 'Videogiochi e film'],
-  ['Quale di queste console è di Nintendo?', ['Switch', 'Xbox', 'PlayStation', 'Dreamcast'], 'Videogiochi e film'],
-  ['Come si chiama il cowboy di Toy Story?', ['Woody', 'Buzz', 'Rex', 'Slinky'], 'Videogiochi e film'],
-  ['In che città vivono i Simpson?', ['Springfield', 'Shelbyville', 'Quahog', 'South Park'], 'Videogiochi e film'],
-  ['A quale città è ispirata Los Santos di GTA V?', ['Los Angeles', 'Las Vegas', 'Miami', 'New York'], 'Videogiochi e film'],
-  ['Chi ha diretto Il Padrino?', ['Francis Ford Coppola', 'Martin Scorsese', 'Sergio Leone', 'Quentin Tarantino'], 'Videogiochi e film'],
-];
+// domande e categorie stanno in quiz-data.js. 'Mancave' (le domande scritte da Simone nella lobby)
+// non ha domande fisse: la aggiungo qui in fondo se quiz-data.js non la elenca, così resta selezionabile
+const QUIZ_CATS = QUIZ_BASE_CATS.includes('Mancave') ? [...QUIZ_BASE_CATS] : [...QUIZ_BASE_CATS, 'Mancave'];
+export { QUIZ, QUIZ_CATS };
 // le domande della partita: categorie scelte + domande Mancave aggiunte da Simone
 // custom: [{ q, a: [giusta, sbagliata, sbagliata, sbagliata] }]
 export function buildQuiz(seed, n, cats, custom = []) {
@@ -334,7 +337,7 @@ function rankKey(game, s, pit, slot) {
   switch (game) {
     case 'barra': return [s.score || 0];
     case 'pallone': return s.popT != null ? [1, -s.popT] : [0, s.n || 0];
-    case 'lattina': case 'regata': case 'labirinto': return s.popT != null ? [1, -s.popT] : [0, s.p || 0];
+    case 'lattina': case 'labirinto': return s.popT != null ? [1, -s.popT] : [0, s.p || 0];
     case 'semaforo': return [-((pit && pit.duel && pit.duel.place[slot]) || 9)];
     case 'patatine': return [s.score || 0];
     case 'piumeno': return [s.best || 0];
@@ -374,7 +377,6 @@ export function liveLabel(game, s, pit, slot) {
     case 'barra': return `${s.score || 0} pt${s.out ? ' · fuori' : ''}`;
     case 'pallone': return s.popT != null ? `BOOM! ${(s.popT / 1000).toFixed(1)}s` : `${Math.round(100 * (s.n || 0) / BALLOON_TAPS)}%`;
     case 'lattina': return s.popT != null ? `SPLASH! ${(s.popT / 1000).toFixed(1)}s` : `${Math.round(s.p || 0)}%`;
-    case 'regata': return s.popT != null ? `Arrivato! ${(s.popT / 1000).toFixed(1)}s` : `${Math.round(s.p || 0)}%`;
     case 'labirinto': return (s.popT != null ? `Uscito! ${(s.popT / 1000).toFixed(1)}s` : `${Math.round(s.p || 0)}%`) + (s.falls ? ` · ${s.falls} cadut${s.falls === 1 ? 'a' : 'e'}` : '');
     case 'semaforo': {
       const D = pit && pit.duel;
@@ -396,7 +398,7 @@ export function liveBar(game, s, pit, slot, maxPts) {
   s = s || {};
   switch (game) {
     case 'pallone': return s.popT != null ? 1 : Math.min(1, (s.n || 0) / BALLOON_TAPS);
-    case 'lattina': case 'regata': case 'labirinto': return s.popT != null ? 1 : Math.min(1, (s.p || 0) / 100);
+    case 'lattina': case 'labirinto': return s.popT != null ? 1 : Math.min(1, (s.p || 0) / 100);
     case 'semaforo': {
       const D = pit && pit.duel;
       if (!D) return 0;
@@ -438,9 +440,9 @@ export function cpuMgTick(b, game, dt, pit, slot) {
   }
   if (pit.stage !== 'play') return s;
   switch (game) {
-    case 'pallone': case 'lattina': case 'regata': {
+    case 'pallone': case 'lattina': {
       if (s.popT != null) break;
-      const rate = L.tap * (0.85 + R() * 0.3) * (game === 'pallone' ? 1 : game === 'lattina' ? 2.2 : 1.6);
+      const rate = L.tap * (0.85 + R() * 0.3) * (game === 'pallone' ? 1 : 2.2);
       if (game === 'pallone') { b.n = (b.n || 0) + rate * dt; if (b.n >= BALLOON_TAPS) { b.n = BALLOON_TAPS; s.popT = Math.round(b.t * 1000); s.done = 1; } s.n = Math.floor(b.n); }
       else { b.p = (b.p || 0) + rate * dt; if (b.p >= CAN_FULL) { b.p = CAN_FULL; s.popT = Math.round(b.t * 1000); s.done = 1; } s.p = Math.floor(b.p); }
       break;

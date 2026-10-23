@@ -1,10 +1,11 @@
 // Grafica 3D: pista di prova, kart, telecamere per riquadro, HUD stile Wii.
 import * as THREE from 'three';
-import { groundHeight, RAMP_LENGTH, obstaclesAt, locate } from './track.js';
-import { MT_BLUE, MT_ORANGE } from './sim.js';
+import { groundHeight, RAMP_LENGTH, obstaclesAt, locate, solidAt } from './track.js';
+import { MT_BLUE, MT_ORANGE, MAX_SPEED } from './sim.js';
 import { LAMPO, LAMPO_MAX } from './minigames.js';
 import { buildMancave } from './render-mancave.js';
 import { buildKartModel } from './kart-model.js';
+import { createCardFx } from './card-fx.js';
 
 const TAG_LAYER0 = 1; // layer delle etichette nome: 1 + slot
 
@@ -25,14 +26,14 @@ function canvasTex(w, h, draw, repeat) {
 }
 
 // ------------------------------------------------------------------ mondo
-function buildProva(scene, track) {
+function buildProva(scene, track, night = false) {
   const R = rng(7);
   const { pts, count, halfWidth: hw, wall } = track;
 
   // cielo a gradiente
   const skyGeo = new THREE.SphereGeometry(1800, 32, 16);
   const col = [];
-  const top = new THREE.Color('#2f8fe0'), mid = new THREE.Color('#8fd2ff'), hor = new THREE.Color('#e6f6ff');
+  const top = new THREE.Color(night ? '#050a1e' : '#2f8fe0'), mid = new THREE.Color(night ? '#0e1a3e' : '#8fd2ff'), hor = new THREE.Color(night ? '#3a2a5a' : '#e6f6ff');
   const pos = skyGeo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i) / 1800;
@@ -43,11 +44,19 @@ function buildProva(scene, track) {
   scene.add(new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false })));
 
   // luci
-  scene.add(new THREE.HemisphereLight('#dff3ff', '#4f8f3a', 1.25));
-  const sun = new THREE.DirectionalLight('#fff4dc', 1.6);
+  scene.add(new THREE.HemisphereLight(night ? '#6d7cff' : '#dff3ff', night ? '#14202a' : '#4f8f3a', night ? 0.55 : 1.25));
+  const sun = new THREE.DirectionalLight(night ? '#9fb4ff' : '#fff4dc', night ? 0.7 : 1.6);   // di notte: la luna
   sun.position.set(-300, 500, -200);
   scene.add(sun);
-  scene.userData.fog = new THREE.Fog('#d9f0ff', 260, 900);
+  scene.userData.fog = new THREE.Fog(night ? '#0b1030' : '#d9f0ff', 260, 900);
+  if (night) {
+    // stelle e neon lungo la pista
+    const sg = new THREE.BufferGeometry(), sp = [];
+    for (let i = 0; i < 900; i++) { const a = R() * Math.PI * 2, e = 0.12 + R() * 1.3; sp.push(Math.cos(a) * Math.cos(e) * 1700, Math.sin(e) * 1700, Math.sin(a) * Math.cos(e) * 1700); }
+    sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+    scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: '#ffffff', size: 3, fog: false, sizeAttenuation: false })));
+    addNeon(scene, track, 0);
+  }
 
   // centro della pista
   let cx = 0, cz = 0;
@@ -388,29 +397,85 @@ function buildCommon(scene, track) {
 
 }
 
-function buildWorld(root, track) {
-  if (track.id === 'mancave') buildMancave(root, track);
-  else buildProva(root, track);
+function buildWorld(root, track, night = false) {
+  if (track.id === 'mancave') buildMancave(root, track, { night });
+  else buildProva(root, track, night);
   buildCommon(root, track);
 }
 
+// foto del kart (per la lobby): un piccolo renderer a parte, una sola volta per colore
+let thumbR = null;
+const thumbCache = new Map();
+export function kartThumb(slot, color) {
+  const key = slot + color;
+  if (thumbCache.has(key)) return thumbCache.get(key);
+  try {
+    if (!thumbR) {
+      thumbR = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      thumbR.setSize(240, 160, false); thumbR.outputColorSpace = THREE.SRGBColorSpace; thumbR.toneMapping = THREE.ACESFilmicToneMapping;
+    }
+    const sc = new THREE.Scene();
+    sc.add(new THREE.HemisphereLight('#ffffff', '#556', 1.1));
+    const d = new THREE.DirectionalLight('#fff', 2.4); d.position.set(-4, 6, 5); sc.add(d);
+    const m = buildKartModel(slot, color);
+    m.body.rotation.y = 0.65; sc.add(m.body);
+    const cam = new THREE.PerspectiveCamera(30, 1.5, 0.1, 100); cam.position.set(0, 3.4, 7.2); cam.lookAt(0, 1.3, 0);
+    thumbR.render(sc, cam);
+    const url = thumbR.domElement.toDataURL('image/png');
+    thumbCache.set(key, url);
+    return url;
+  } catch (e) { return null; }
+}
+
+// strisce al neon ai bordi della pista (di notte)
+export function addNeon(scene, track, baseY = 0) {
+  const { pts, count, halfWidth: hw } = track;
+  const H = (i) => (track.hs ? track.hs[(i + count) % count] : 0) + baseY;
+  for (const [lat, col] of [[-(hw + 0.5), '#ff3dbb'], [hw + 0.5, '#29e6ff']]) {
+    const v = [], id = [];
+    for (let i = 0; i <= count; i++) {
+      const p = pts[i % count], y = H(i % count) + 0.13;
+      if (track.step && track.step[i % count]) { v.push(p.x + p.rx * lat, y, p.z + p.rz * lat, p.x + p.rx * (lat + Math.sign(lat) * 0.5), y, p.z + p.rz * (lat + Math.sign(lat) * 0.5)); continue; }
+      v.push(p.x + p.rx * lat, y, p.z + p.rz * lat, p.x + p.rx * (lat + Math.sign(lat) * 0.5), y, p.z + p.rz * (lat + Math.sign(lat) * 0.5));
+      if (i > 0 && !(track.step && track.step[i % count])) { const a = (i - 1) * 2; id.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.setIndex(id);
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -12 }));
+    m.userData.noShadow = true;
+    scene.add(m);
+  }
+}
+
 // ------------------------------------------------------------------ kart
-function nameSprite(name, color) {
-  const tex = canvasTex(256, 64, (g, w, h) => {
+function nameSprite(name, color, photo = null) {
+  // etichetta col nome; se c'è il selfie, la faccia in un cerchio sopra il nome
+  const H = photo ? 160 : 64;
+  const pill = (g, w, y0) => {
     g.font = '900 34px "Nunito", "Arial Black", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     const tw = Math.min(w - 8, g.measureText(name).width + 34);
     g.fillStyle = 'rgba(14,18,34,0.78)';
-    g.beginPath(); g.roundRect((w - tw) / 2, 8, tw, h - 16, 20); g.fill();
-    g.fillStyle = color; g.beginPath(); g.arc((w - tw) / 2 + 18, h / 2, 7, 0, 7); g.fill();
-    g.fillStyle = '#fff'; g.fillText(name, w / 2 + 8, h / 2 + 2);
-  });
+    g.beginPath(); g.roundRect((w - tw) / 2, y0 + 8, tw, 48, 20); g.fill();
+    g.fillStyle = color; g.beginPath(); g.arc((w - tw) / 2 + 18, y0 + 32, 7, 0, 7); g.fill();
+    g.fillStyle = '#fff'; g.fillText(name, w / 2 + 8, y0 + 34);
+  };
+  const tex = canvasTex(256, H, (g, w) => pill(g, w, H - 64));
+  if (photo) {
+    const img = new Image();
+    img.onload = () => {
+      const c = tex.image, g = c.getContext('2d');
+      g.save(); g.beginPath(); g.arc(128, 50, 46, 0, 7); g.clip(); g.drawImage(img, 82, 4, 92, 92); g.restore();
+      g.lineWidth = 7; g.strokeStyle = color; g.beginPath(); g.arc(128, 50, 46, 0, 7); g.stroke();
+      tex.needsUpdate = true;
+    };
+    img.src = photo;
+  }
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  sp.scale.set(5, 1.25, 1);
+  sp.scale.set(5, 5 * H / 256, 1);
   sp.renderOrder = 10;
   return sp;
 }
 
-function makeKart(slot, name, color) {
+function makeKart(slot, name, color, photo = null) {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
@@ -437,8 +502,8 @@ function makeKart(slot, name, color) {
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(1.9, 20), new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2; shadow.scale.set(1, 1.35, 1);
   // etichetta nome
-  const tag = nameSprite(name, color);
-  tag.position.set(0, 4.1, 0);
+  const tag = nameSprite(name, color, photo);
+  tag.position.set(0, photo ? 4.9 : 4.1, 0);
   tag.layers.set(TAG_LAYER0 + slot);
   root.add(tag);
   // scudo (bolla) e bomba sopra la testa
@@ -477,8 +542,10 @@ export function createRenderer(canvas, hudRoot, track) {
   renderer.shadowMap.autoUpdate = false;
   const scene = new THREE.Scene();
   let world = new THREE.Group();
-  buildWorld(world, track);
+  let night = false;
+  buildWorld(world, track, night);
   scene.add(world);
+  const cfx = createCardFx(scene);
   applyLook();
   // aspetto della pista: nebbia, tone mapping, riflessi, sfondo
   function applyLook() {
@@ -488,12 +555,13 @@ export function createRenderer(canvas, hudRoot, track) {
     renderer.toneMapping = u.toneMapping || THREE.NoToneMapping;
     renderer.toneMappingExposure = u.exposure || 1;
     if (scene.environment) { scene.environment.dispose(); scene.environment = null; }
-    if (u.makeEnv) scene.environment = u.makeEnv(renderer);
+    if (u.makeEnv) scene.environment = u.makeEnv(renderer, !!u.night);
     renderer.shadowMap.needsUpdate = true;
     u.refresh = () => { renderer.shadowMap.needsUpdate = true; };
   }
   // cambio pista: butto via il mondo vecchio e costruisco il nuovo
-  function setTrack(t) {
+  function setTrack(t, nightOn = night) {
+    night = !!nightOn;
     scene.remove(world);
     world.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
@@ -502,7 +570,7 @@ export function createRenderer(canvas, hudRoot, track) {
     });
     track = t;
     world = new THREE.Group();
-    buildWorld(world, track);
+    buildWorld(world, track, night);
     scene.add(world);
     applyLook();
     bounds = computeBounds();
@@ -511,6 +579,7 @@ export function createRenderer(canvas, hudRoot, track) {
   }
 
   const karts = new Map();
+  let snapPhotos = {};
   let layout = [];        // [{slot}] per riquadro
   let views = [];         // stato per riquadro
   let mapBase = null;
@@ -549,9 +618,11 @@ export function createRenderer(canvas, hudRoot, track) {
 
   function ensureKart(k) {
     let m = karts.get(k.slot);
-    if (!m || m.name !== k.name || m.color !== k.color) {
+    if (!m || m.name !== k.name || m.color !== k.color || m.photo !== (snapPhotos[k.slot] || null)) {
       if (m) { scene.remove(m.root, m.shadow); }
-      m = makeKart(k.slot, k.name, k.color);
+      m = makeKart(k.slot, k.name, k.color, snapPhotos[k.slot] || null);
+      m.photo = snapPhotos[k.slot] || null;
+      cfx.attachKart(m);
       scene.add(m.root, m.shadow);
       karts.set(k.slot, m);
     }
@@ -577,6 +648,10 @@ export function createRenderer(canvas, hudRoot, track) {
         <div class="v-meters"><div class="vm-card"></div><div class="vm-pit"></div></div>
         <div class="v-mirror"></div>
         <div class="v-hit"></div>
+        <div class="v-police"></div>
+        <div class="v-rewind"><b>⏪</b><span>RALLENTATORE</span></div>
+        <div class="v-call"><div class="vc-top">Chiamata in arrivo…</div><div class="vc-name"></div><div class="vc-sub">rifiuta dal telefono!</div><div class="vc-btns"><i class="no">✕</i><i class="yes">✆</i></div></div>
+        <div class="v-big"></div>
         <div class="v-lampo"><small>MINIGIOCO LAMPO</small><b></b><span>sul telefono · chi finisce riparte subito</span></div>`;
       hudRoot.appendChild(el);
       const cam = new THREE.PerspectiveCamera(72, 1, 0.3, 2500);
@@ -592,6 +667,7 @@ export function createRenderer(canvas, hudRoot, track) {
         fog: el.querySelector('.v-fog'), fx: el.querySelector('.v-fx'),
         rank: el.querySelector('.v-rank'), mCard: el.querySelector('.vm-card'), mPit: el.querySelector('.vm-pit'),
         lampo: el.querySelector('.v-lampo'), lampoOn: false,
+        police: el.querySelector('.v-police'), rewind: el.querySelector('.v-rewind'), call: el.querySelector('.v-call'), big: el.querySelector('.v-big'), bigUntil: 0,
         mirrorEl: el.querySelector('.v-mirror'), hit: el.querySelector('.v-hit'), hitUntil: 0, rankSig: '', prevPlaces: {}, arrows: {},
         mcam: (() => { const c = new THREE.PerspectiveCamera(60, 3, 0.3, 2500); c.layers.enable(0); for (let s = 0; s < 8; s++) if (s !== v.slot) c.layers.enable(TAG_LAYER0 + s); return c; })(),
       };
@@ -605,17 +681,32 @@ export function createRenderer(canvas, hudRoot, track) {
 
   // oggetti delle carte sulla pista (olio, missili): li riuso
   const pool = { oil: new Map(), missile: new Map() };
-  const oilGeo = new THREE.CircleGeometry(2.2, 20);
-  const oilMat = new THREE.MeshLambertMaterial({ color: '#141414', emissive: '#2a1f3d', emissiveIntensity: 0.5 });
+  // pozza d'olio nera e lucida, dal bordo irregolare
+  const oilGeo = (() => {
+    const sh = new THREE.Shape();
+    for (let i = 0; i <= 48; i++) {
+      const a = i / 48 * Math.PI * 2, r = 2.3 * (1 + 0.16 * Math.sin(a * 3 + 1) + 0.09 * Math.sin(a * 7) + 0.05 * Math.sin(a * 11));
+      if (i) sh.lineTo(Math.cos(a) * r, Math.sin(a) * r); else sh.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    return new THREE.ShapeGeometry(sh, 24);
+  })();
+  const oilMat = new THREE.MeshPhysicalMaterial({ color: '#07070a', roughness: 0.05, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.02, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 });
+  // razzo: corpo bianco e rosso, punta, alette e fiamma (la scia di fumo la fanno le particelle)
   function makeMissile() {
     const g = new THREE.Group();
-    const bodyM = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1.6, 10), new THREE.MeshLambertMaterial({ color: '#e8322b' }));
-    bodyM.rotation.x = Math.PI / 2;
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.7, 10), new THREE.MeshLambertMaterial({ color: '#ffffff' }));
-    nose.rotation.x = Math.PI / 2; nose.position.z = 1.15;
-    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.9, 8), new THREE.MeshBasicMaterial({ color: '#ffb300' }));
-    flame.rotation.x = -Math.PI / 2; flame.position.z = -1.2;
-    g.add(bodyM, nose, flame);
+    const white = new THREE.MeshStandardMaterial({ color: '#f4f4f4', roughness: 0.3, metalness: 0.2 });
+    const red = new THREE.MeshStandardMaterial({ color: '#e53935', roughness: 0.3, metalness: 0.2 });
+    const bodyM = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 2.0, 16), white); bodyM.rotation.x = Math.PI / 2;
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.43, 0.43, 0.35, 16), red); band.rotation.x = Math.PI / 2; band.position.z = 0.35;
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.9, 16), red); nose.rotation.x = Math.PI / 2; nose.position.z = 1.45;
+    g.add(bodyM, band, nose);
+    for (let i = 0; i < 4; i++) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.55, 0.6), red);
+      const a = i * Math.PI / 2; fin.position.set(Math.cos(a) * 0.5, Math.sin(a) * 0.5, -0.8); fin.rotation.z = a; g.add(fin);
+    }
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.34, 1.3, 10), new THREE.MeshBasicMaterial({ color: '#ffb300' }));
+    flame.rotation.x = -Math.PI / 2; flame.position.z = -1.65;
+    g.add(flame);
     return g;
   }
   // macchina della polizia (carta Inseguimento) con le luci che lampeggiano
@@ -640,6 +731,31 @@ export function createRenderer(canvas, hudRoot, track) {
     const l = locate(track, x, z, o.userData.gIdx ?? -1);
     o.userData.gIdx = l.idx;
     return groundHeight(track, l.s, l.lat);
+  }
+  // ---- vista doppia dello Sbronzo
+  const drunkRT = new THREE.WebGLRenderTarget(640, 360, { colorSpace: THREE.SRGBColorSpace });
+  const ovCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const ovMat = new THREE.MeshBasicMaterial({ map: drunkRT.texture, transparent: true, opacity: 0.45, depthTest: false, depthWrite: false, toneMapped: false });
+  const ovScene = new THREE.Scene(); ovScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), ovMat));
+  const ghostCam = new THREE.PerspectiveCamera();
+  function drunkPass(v, k, x, y, w, h, H, tsec) {
+    const wob = Math.min(1, k.drunkT);
+    ghostCam.copy(v.cam);
+    const off = (0.9 + Math.sin(tsec * 1.7) * 0.5) * wob;
+    ghostCam.translateX(off); ghostCam.rotateY(-0.012 * wob); ghostCam.updateProjectionMatrix();
+    ghostCam.layers.mask = v.cam.layers.mask;
+    renderer.setScissorTest(false);
+    renderer.setRenderTarget(drunkRT);
+    renderer.render(scene, ghostCam);
+    renderer.setRenderTarget(null);
+    renderer.setScissorTest(true);
+    renderer.setViewport(x, H - y - h, w, h);
+    renderer.setScissor(x, H - y - h, w, h);
+    ovMat.color.setHSL((tsec * 0.35) % 1, 1, 0.72);   // colori che cambiano: rosa, verde, azzurro...
+    ovMat.opacity = 0.42 * wob;
+    const ac = renderer.autoClear; renderer.autoClear = false;
+    renderer.render(ovScene, ovCam);
+    renderer.autoClear = ac;
   }
   function syncPool(kind, list, make, place) {
     const seen = new Set();
@@ -678,7 +794,7 @@ export function createRenderer(canvas, hudRoot, track) {
     }
     const sig = list.map(q => {
       const a = v.arrows[q.slot] && v.arrows[q.slot].until > now ? (v.arrows[q.slot].up ? 'u' : 'd') : '';
-      return `${q.slot}:${q.place}:${a}:${q.name}:${q.color}`;
+      return `${q.slot}:${q.place}:${a}:${q.name}:${q.color}:${snap.photoVer || 0}`;
     }).join('|');
     if (sig === v.rankSig) return;
     v.rankSig = sig;
@@ -689,7 +805,10 @@ export function createRenderer(canvas, hudRoot, track) {
       row.className = 'vr' + (q.slot === v.slot ? ' me' : '');
       row.innerHTML = '<b></b><i></i><span></span><em></em>';
       row.querySelector('b').textContent = q.place;
-      row.querySelector('i').style.background = q.color;
+      const ph = snap.photos && snap.photos[q.slot];
+      const dot = row.querySelector('i');
+      dot.style.background = q.color;
+      if (ph) { dot.classList.add('ph'); dot.style.backgroundImage = `url(${ph})`; dot.style.borderColor = q.color; }
       row.querySelector('span').textContent = q.name;
       const em = row.querySelector('em');
       if (a) { em.className = a; em.textContent = a === 'up' ? '▲' : '▼'; }
@@ -720,11 +839,16 @@ export function createRenderer(canvas, hudRoot, track) {
     for (const n of snap.notes || []) {
       if (n.slot !== v.slot || (v.seenNotes || (v.seenNotes = new Set())).has(n.id)) continue;
       v.seenNotes.add(n.id);
+      if (n.cls === 'big') {   // scritta grande della carta che ti ha colpito
+        v.big.textContent = n.text; v.big.className = 'v-big'; void v.big.offsetWidth; v.big.className = 'v-big show k-' + (n.kind || '');
+        v.bigUntil = now + 1500; continue;
+      }
       v.hit.textContent = n.text;
       v.hit.className = 'v-hit show ' + (n.cls || '');
       v.hitUntil = now + 1800;
     }
     if (now > v.hitUntil && v.hit.classList.contains('show')) v.hit.className = 'v-hit';
+    if (now > v.bigUntil && v.big.classList.contains('show')) v.big.className = 'v-big';
   }
 
   // snap: stato di gioco; slots: array di slot (o -1) per riquadro
@@ -735,6 +859,7 @@ export function createRenderer(canvas, hudRoot, track) {
       if (snap.phase === 'intro') views.forEach(v => { v.msgUntil = 0; v.lastLap = -1; v.lastPlace = 0; v.finishedShown = false; v.msg.className = 'v-msg'; v.init = false; });
       lastPhase = snap.phase;
     }
+    if (!!snap.night !== night && snap.trackId === track.id) setTrack(track, !!snap.night);
     const sig = slots.join(',');
     if (sig !== lastSig) { layout = slots.map(s => ({ slot: s })); buildHud(slots.length); lastSig = sig; }
     const W = canvas.clientWidth, H = canvas.clientHeight;
@@ -745,6 +870,7 @@ export function createRenderer(canvas, hudRoot, track) {
     const tsec = now / 1000;
 
     // aggiorna i kart
+    snapPhotos = snap.photos || {};
     const present = new Set();
     for (const k of snap.karts) {
       present.add(k.slot);
@@ -770,17 +896,14 @@ export function createRenderer(canvas, hudRoot, track) {
       m.flames.forEach((f, i) => {
         f.visible = boosting;
         if (boosting) {
-          const s = 0.8 + Math.sin(tsec * 40 + i) * 0.25;
-          f.scale.set(s, s * (k.boostKind === 'orange' || k.boostKind === 'start' ? 1.4 : 1), s);
+          const s = 1.35 + Math.sin(tsec * 40 + i) * 0.35;
+          f.scale.set(s, s * (k.boostKind === 'orange' || k.boostKind === 'start' ? 1.8 : 1.3), s);
           f.material.color.set(k.boostKind === 'blue' ? '#4fc3ff' : '#ff9a1f');
         }
       });
       // effetti delle carte
-      m.shield.visible = k.shieldT > 0 || k.mirror > 0;
-      if (m.shield.visible) {
-        m.shield.material.color.set(k.mirror > 0 ? '#e0e6ee' : '#4fc3ff');
-        m.shield.material.opacity = 0.22 + Math.sin(tsec * 6) * 0.06;
-      }
+      m.shield.visible = false;
+      cfx.updateKart(m, k, tsec, dt);
       m.bomb.visible = k.bombT > 0;
       if (m.bomb.visible) m.fuse.visible = Math.sin(tsec * (k.bombT < 3 ? 30 : 12)) > 0;
       const ghost = k.ghostT > 0;
@@ -801,6 +924,8 @@ export function createRenderer(canvas, hudRoot, track) {
       });
     }
     for (const [slot, m] of karts) if (!present.has(slot)) { scene.remove(m.root, m.shadow); karts.delete(slot); }
+    // effetti delle carte (icone, esplosioni, teletrasporto...) e particelle
+    if (snap.phase === 'race' || snap.phase === 'finish') cfx.cardEvents(snap, karts, (e) => onEvent(e));
     // aspirapolvere e gatto
     if (track.obstacleMeshes) {
       const obs = obstaclesAt(track, snap.raceTime || tsec);
@@ -827,6 +952,13 @@ export function createRenderer(canvas, hudRoot, track) {
         o.userData.lights[0].visible = on; o.userData.lights[1].visible = !on;
       } else { o.position.set(m.x, groundAt(o, m.x, m.z) + 1.1, m.z); o.rotation.y = m.yaw; }
     });
+    // scia di fumo dei missili
+    for (const [id, o] of pool.missile) if (!o.userData.lights && Math.random() < dt * 45) {
+      const fx = Math.sin(o.rotation.y), fz = Math.cos(o.rotation.y);
+      cfx.emit(o.position.x - fx * 1.4, o.position.y, o.position.z - fz * 1.4, { vy: 0.6, life: 1.1, s0: 0.9, s1: 3.4, color: '#cfcfcf', a: 0.6, drag: 1 });
+      cfx.emit(o.position.x - fx * 1.2, o.position.y, o.position.z - fz * 1.2, { life: 0.18, s0: 1.2, s1: 0.3, color: '#ffb340', a: 1, drag: 0 });
+    }
+    cfx.setScale(H); cfx.update(dt);
     if (feedEl) {
       const fs = (snap.feed || []).join('|');
       if (fs !== feedSig) {
@@ -861,17 +993,39 @@ export function createRenderer(canvas, hudRoot, track) {
         let d = k.yaw - v.yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
         v.yaw += d * Math.min(1, dt * 5.5);
         const cx = Math.sin(v.yaw), cz = Math.cos(v.yaw);
-        const back = snap.phase === 'finish' && k.finished ? 9 : 7.2;
+        // telecamera alta e indietro: il kart sta piccolo in basso e si vede tanta strada davanti
+        const back = snap.phase === 'finish' && k.finished ? 12 : 9.6;
         // la telecamera segue l'altezza del kart (mobili, salti) senza scatti
         if (v.camY == null || !v.init2) { v.camY = k.y; v.init2 = true; }
         v.camY += (k.y - v.camY) * Math.min(1, dt * (k.y > v.camY ? 8 : 4));
-        const camY = v.camY + 3.1;
+        const camY = v.camY + 4.7;
         v.cam.position.set(k.x - cx * back, camY, k.z - cz * back);
+        // la telecamera non entra nelle barriere: se dietro c'è un muro (curve strette) si avvicina al kart e sale un po'
+        {
+          const lim = track.wall - 1.2;
+          const out = (t) => {
+            const x = k.x - cx * back * t, z = k.z - cz * back * t;
+            let l = locate(track, x, z, v.camIdx ?? -1);
+            if (Math.abs(l.lat) > track.wall * 2) l = locate(track, x, z, -1);
+            v.camIdx = l.idx;
+            if (Math.abs(l.lat) > lim) return true;
+            // ...e non entra nei mobili
+            const cy = camY + (1 - t) * 3;
+            return solidAt(track, x, z, cy - 1.2, cy + 1.2);
+          };
+          let t = 1;
+          if (out(1)) { for (const tt of [0.85, 0.7, 0.55, 0.4]) { t = tt; if (!out(tt)) break; } }
+          v.camT = (v.camT ?? 1) + (t - (v.camT ?? 1)) * Math.min(1, dt * (t < (v.camT ?? 1) ? 10 : 3));
+          v.cam.position.set(k.x - cx * back * v.camT, camY + (1 - v.camT) * 3, k.z - cz * back * v.camT);
+        }
         // Sbronzo: la visuale ondeggia
         const wob = k.drunkT > 0 ? Math.min(1, k.drunkT) : 0;
         v.cam.up.set(Math.sin(tsec * 2.6) * 0.16 * wob * cz, 1, -Math.sin(tsec * 2.6) * 0.16 * wob * cx);
-        v.cam.lookAt(k.x + fx * 3.5 + Math.sin(tsec * 1.9) * 1.2 * wob, v.camY + (k.y - v.camY) * 0.5 + 1.6, k.z + fz * 3.5 + Math.cos(tsec * 1.7) * 1.2 * wob);
-        const target = k.boostT > 0 ? 84 : 72;
+        // lo sguardo punta più avanti, sulla curva che arriva
+        v.cam.lookAt(k.x + cx * 11 + Math.sin(tsec * 1.9) * 1.2 * wob, v.camY + (k.y - v.camY) * 0.5 + 0.9, k.z + cz * 11 + Math.cos(tsec * 1.7) * 1.2 * wob);
+        // più vai forte, più la visuale si allarga (col turbo ancora di più)
+        const sp = Math.min(1, Math.max(0, Math.abs(k.speed || 0) / MAX_SPEED));
+        const target = 64 + sp * 8 + (k.boostT > 0 ? 12 : 0);
         v.fov += (target - v.fov) * Math.min(1, dt * 4);
         v.cam.fov = v.fov;
       }
@@ -881,6 +1035,8 @@ export function createRenderer(canvas, hudRoot, track) {
       renderer.setViewport(x, H - y - h, w, h);
       renderer.setScissor(x, H - y - h, w, h);
       renderer.render(scene, v.cam);
+      // Sbronzo: vista doppia con i colori sfasati (una seconda immagine spostata e colorata sopra)
+      if (k && k.drunkT > 0 && snap.phase === 'race') drunkPass(v, k, x, y, w, h, H, tsec);
 
       // ---- specchietto retrovisore (in alto al centro)
       const showMirror = k && (snap.phase === 'race' || snap.phase === 'finish') && !k.finished && (mirrorOn === 'force' || (mirrorOn && prStep < STEPS.length - 1));
@@ -891,12 +1047,16 @@ export function createRenderer(canvas, hudRoot, track) {
         v.mirrorEl.style.width = (mw / w * 100) + '%'; v.mirrorEl.style.height = (mh / h * 100) + '%';
         const fx2 = Math.sin(k.yaw), fz2 = Math.cos(k.yaw);
         v.mcam.aspect = mw / mh;
-        v.mcam.position.set(k.x - fx2 * 1.5, k.y + 1.7, k.z - fz2 * 1.5);   // dietro al kart: il pilota non copre la vista
+        v.mcam.position.set(k.x - fx2 * 1.0, k.y + 1.9, k.z - fz2 * 1.0);
         v.mcam.lookAt(k.x - fx2 * 30, k.y + 1.2, k.z - fz2 * 30);
         v.mcam.updateProjectionMatrix();
         renderer.setViewport(mx, H - my - mh, mw, mh);
         renderer.setScissor(mx, H - my - mh, mw, mh);
+        // nello specchietto il proprio kart (pilota, alettone, fiamme) non c'è: si vede solo chi sta dietro
+        const own = karts.get(v.slot);
+        if (own) own.root.visible = false;
         renderer.render(scene, v.mcam);
+        if (own) own.root.visible = true;
       }
 
       // ---- HUD
@@ -924,12 +1084,21 @@ export function createRenderer(canvas, hudRoot, track) {
         bars[2].className = c >= MT_ORANGE ? 'on o' : '';
         v.mt.classList.toggle('show', !!k.drifting);
         v.fog.style.opacity = k.fogT > 0 ? Math.min(0.94, k.fogT * 0.6) : 0;
+        // polizia: bordo che lampeggia blu e rosso per chi è inseguito
+        const chased = k.copT > 0 || (snap.missiles || []).some(q => q.kind === 'police' && q.to === v.slot);
+        v.police.classList.toggle('show', chased);
+        // Telecomando: simbolo del rallentatore
+        v.rewind.classList.toggle('show', k.slowmoT > 0);
+        // Telefonata: la chiamata in arrivo anche sulla TV
+        const calling = k.callT > 0;
+        if (calling !== v.call.classList.contains('show')) {
+          v.call.classList.toggle('show', calling);
+          if (calling) { const c = snap.karts.find(q => q.slot === k.callFrom); v.call.querySelector('.vc-name').textContent = c ? c.name : 'Numero sconosciuto'; }
+        }
         const fx = [];
         if (k.shieldT > 0) fx.push(`Scudo ${Math.ceil(k.shieldT)}`);
         if (k.mirror > 0) fx.push(k.mirrorT > 0 ? `Specchio ${Math.ceil(k.mirrorT)}` : 'Specchio');
-        if (k.drunkT > 0) fx.push('Sbronzo!');
-        if (k.callT > 0) fx.push('Al telefono!');
-        if (k.slowmoT > 0) fx.push('Rallentatore');
+
         if (k.copT > 0) fx.push('Fermato dalla polizia!');
         if (k.invertT > 0) fx.push('Sterzo al contrario!');
         if (k.stopT > 0) fx.push('Bloccato!');
@@ -1001,7 +1170,7 @@ export function createRenderer(canvas, hudRoot, track) {
   let onEvent = () => {};
   let mirrorOn = true;
   return {
-    render, renderer, perf, quality: () => STEPS[prStep], setTrack,
+    render, renderer, perf, quality: () => STEPS[prStep], setTrack, scene,
     onEvent: (fn) => { onEvent = fn; }, setMirror: (on) => { mirrorOn = on; },
   };
 }

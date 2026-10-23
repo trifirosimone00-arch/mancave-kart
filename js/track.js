@@ -253,3 +253,41 @@ export function locate(track, x, z, hint = -1) {
   if (s >= track.length) s -= track.length;
   return { idx: best, lat, s };
 }
+
+// ------------------------------------------------------------------ mobili solidi
+// track.solid è una griglia (riempita dalla grafica quando i mobili sono caricati): per ogni cella
+// le fasce di altezza occupate. Un kart (o la telecamera) non può entrare in una cella occupata alla sua altezza.
+export function solidAt(track, x, z, y0, y1) {
+  const S = track.solid;
+  if (!S) return false;
+  const i = Math.floor((x - S.x0) / S.cs), j = Math.floor((z - S.z0) / S.cs);
+  if (i < 0 || j < 0 || i >= S.nx || j >= S.nz) return false;
+  const spans = S.cells.get(j * S.nx + i);
+  if (!spans) return false;
+  for (let k = 0; k < spans.length; k += 2) if (spans[k] < y1 && spans[k + 1] > y0) return true;
+  return false;
+}
+// il kart è un cerchio di raggio ~1,2 alto ~3
+export function kartBlocked(track, x, z, y) {
+  if (!track.solid) return false;
+  const y0 = y + 0.35, y1 = y + 3;
+  if (solidAt(track, x, z, y0, y1)) return true;
+  for (let a = 0; a < 8; a++) {
+    const ang = a * Math.PI / 4;
+    if (solidAt(track, x + Math.cos(ang) * 1.2, z + Math.sin(ang) * 1.2, y0, y1)) return true;
+  }
+  return false;
+}
+
+// direzione per uscire dai mobili (somma delle direzioni libere meno quelle occupate), o null
+export function solidPush(track, x, z, y, r = 1.6) {
+  if (!track.solid) return null;
+  let px = 0, pz = 0, hit = false;
+  for (let a = 0; a < 12; a++) {
+    const ang = a * Math.PI / 6, cx = Math.cos(ang), cz = Math.sin(ang);
+    for (const rr of [r * 0.6, r]) if (solidAt(track, x + cx * rr, z + cz * rr, y + 0.35, y + 3)) { px -= cx; pz -= cz; hit = true; break; }
+  }
+  if (!hit) return null;
+  const l = Math.hypot(px, pz) || 1;
+  return { x: px / l, z: pz / l };
+}

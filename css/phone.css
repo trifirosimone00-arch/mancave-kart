@@ -140,9 +140,6 @@ input[type="range"] { width: 100%; height: 36px; }
 .mg-offer .display { margin: 0; font-size: 26px; }
 .offer-cards { display: flex; gap: 12px; }
 .offer-cards .card { cursor: pointer; }
-.sink { position: relative; width: 100%; height: 90px; border-radius: 45px; background: linear-gradient(#bfe6ff, #6fbbe8); border: 5px solid #e8ecf5; overflow: hidden; }
-.sink .boat { position: absolute; left: 0; top: 50%; transform: translateY(-55%); font-size: 52px; font-style: normal; transition: left 0.1s linear; }
-.sink .flag { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 36px; font-style: normal; }
 .maze { flex: 2.4; min-width: 0; height: 100%; touch-action: none; }
 .maze-side { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; }
 .maze-side .btn { min-height: 40px; padding: 6px 12px; font-size: 14px; }
@@ -181,6 +178,40 @@ html.rot #pad, html.rot #mg { inset: auto; top: 0; left: 0; width: 100vh; height
 .lp-nums button { border: 0; border-radius: 18px; background: var(--ink-2); color: #fff; font-family: 'Bungee', sans-serif; font-size: 40px; touch-action: none; }
 .lp-nums button.ok { background: var(--green); }
 .lp-nums button.no { background: var(--red); }
+/* lampo: Cambio gomme */
+.lp-wheels { flex: 2; display: flex; gap: 10px; align-items: center; justify-content: space-around; min-width: 0; container-type: size; }
+.lp-wheel { position: relative; flex: none; width: min(23cqw, 96cqh); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle closest-side, #c9ced9 0 52%, #8e96a8 53% 62%, #22252e 63% 100%); box-shadow: inset 0 0 0 4px #0c0d12; opacity: 0.45; transition: opacity 0.15s; }
+.lp-wheel.cur { opacity: 1; box-shadow: inset 0 0 0 4px #0c0d12, 0 0 0 4px var(--yellow); }
+.lp-wheel.ok { opacity: 1; box-shadow: inset 0 0 0 4px #0c0d12, 0 0 0 4px var(--green); }
+.lp-hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 22%; height: 22%; border-radius: 50%; background: #5d6475; color: #fff; font-family: 'Bungee', sans-serif; font-size: clamp(12px, 4vmin, 20px); display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.lp-bolt { position: absolute; left: 50%; top: 50%; width: 30%; height: 30%; margin: -15% 0 0 -15%; border: 3px solid #3a3f4c; border-radius: 50%; background: radial-gradient(circle, #f4f6fa 0 40%, #b7bdc9 70%); color: #12162a; font-family: 'Bungee', sans-serif; font-size: clamp(14px, 5vmin, 24px); padding: 0; transform: rotate(var(--a)) translateY(-100%) rotate(calc(-1 * var(--a))); touch-action: none; -webkit-tap-highlight-color: transparent; }
+.lp-bolt.ok { background: var(--green); color: #fff; border-color: #1a7a42; }
+.lp-bolt.no { background: var(--red); color: #fff; }
+/* lampo: Lava il parabrezza */
+.lp-glass { flex: 2; display: grid; grid-template-columns: repeat(var(--cols), 1fr); border: 6px solid #12141c; border-radius: 34px 34px 12px 12px; overflow: hidden; touch-action: none; background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.35) 38%, transparent 46%), linear-gradient(#8fd3ff, #d9f1ff); }
+.lp-glass i { display: block; background: radial-gradient(circle closest-side, #6b4a26 0 55%, rgba(107,74,38,0.65) 80%, transparent 100%); transform: scale(1.7); transition: opacity 0.08s; }
+/* lampo: Memory veloce */
+.lp-mem { flex: 2; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.lp-mem button { border: 0; border-radius: 22px; background: var(--c); color: rgba(255,255,255,0.85); font-size: clamp(30px, 11vmin, 56px); opacity: 0.55; box-shadow: 0 8px 0 rgba(0,0,0,0.35); touch-action: none; -webkit-tap-highlight-color: transparent; transition: opacity 0.08s, transform 0.08s; }
+.lp-mem button.wait { opacity: 0.3; }
+.lp-mem button.on { opacity: 1; transform: scale(1.05); box-shadow: 0 0 0 5px #fff, 0 0 28px var(--c); }
+/* lampo: Conta i kart */
+.lp-conta { flex: 2; position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; border-radius: 18px; background: var(--ink-2); overflow: hidden; }
+.lp-scene { position: absolute; inset: 6px; background: repeating-linear-gradient(90deg, #3b4152 0 40px, #353a4a 40px 80px); border-radius: 14px; }
+.lp-kart { position: absolute; width: 10%; height: 15%; }
+.lp-kart.flip { transform: scaleX(-1); }
+.lp-kart b { position: absolute; left: 4%; right: 4%; top: 22%; bottom: 22%; background: var(--c); border: 2px solid #111; border-radius: 30% 55% 30% 30%; }
+.lp-kart em { position: absolute; left: 30%; top: 0; width: 32%; height: 42%; border-radius: 50%; background: #f4f6fa; border: 2px solid #111; }
+.lp-kart::before, .lp-kart::after { content: ''; position: absolute; bottom: 0; width: 26%; height: 42%; border-radius: 50%; background: #111; }
+.lp-kart::before { left: 6%; }
+.lp-kart::after { right: 6%; }
+.lp-msg { margin: 0; font-weight: 900; font-size: clamp(17px, 5vmin, 24px); text-align: center; padding: 0 12px; }
+.lp-q { position: absolute; inset: 8px; display: flex; flex-direction: column; gap: 8px; }
+.lp-q p { margin: 0; text-align: center; font-weight: 900; font-size: clamp(18px, 5.5vmin, 28px); }
+.lp-q p b { font-family: 'Bungee', sans-serif; text-transform: uppercase; }
+.lp-ans { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.lp-ans button { border: 0; border-radius: 18px; background: var(--ink-3); color: #fff; font-family: 'Bungee', sans-serif; font-size: clamp(30px, 11vmin, 54px); touch-action: none; }
+.lp-ans button.ok { background: var(--green); }
 /* Telefonata */
 .callscr { position: fixed; inset: 0; z-index: 20; background: linear-gradient(#3a4a6b, #12162a); display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 6vh 20px; touch-action: none; }
 .call-top { display: flex; flex-direction: column; align-items: center; gap: 8px; }
@@ -190,3 +221,23 @@ html.rot #pad, html.rot #mg { inset: auto; top: 0; left: 0; width: 100vh; height
 .call-slide { position: relative; width: min(420px, 90%); height: 70px; border-radius: 35px; background: rgba(255,255,255,0.18); display: flex; align-items: center; padding: 4px; }
 .call-slide span { position: absolute; left: 0; right: 0; text-align: center; color: #fff; font-weight: 800; pointer-events: none; }
 .call-knob { position: relative; z-index: 1; width: 62px; height: 62px; border-radius: 50%; background: #ff3b30; color: #fff; font-size: 30px; display: flex; align-items: center; justify-content: center; touch-action: none; }
+
+/* selfie */
+.selfie { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; margin: 6px 0 10px; }
+.selfie-pic { width: 64px; height: 64px; border-radius: 50%; background: #1d2340 center/cover no-repeat; border: 3px solid var(--yellow, #ffd400); display: grid; place-items: center; font-size: 26px; }
+.selfie-pic.has span { display: none; }
+.selfie-btn { cursor: pointer; }
+.selfie .small { width: 100%; text-align: center; margin: 0; }
+
+/* volante più bello: sfondo con luce, tasti a rilievo, carte con il simbolo */
+#pad { background: radial-gradient(120% 90% at 50% 110%, #24306a 0%, #12162a 60%, #0b0e1c 100%); }
+.pad-place { font-size: 40px; -webkit-text-stroke: 1.5px #1a1a1a; text-shadow: 0 3px 0 #1a1a1a; }
+.pad-tools .icon { background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.12); }
+.pbtn.drift { background: linear-gradient(180deg, #4d8dff 0%, #2f6be8 55%, #2459cc 100%); box-shadow: 0 8px 0 #163f99, 0 14px 24px rgba(0,0,0,0.4), inset 0 2px 0 rgba(255,255,255,0.35); text-shadow: 0 2px 0 rgba(0,0,0,0.3); }
+.pbtn.drift.down { box-shadow: 0 3px 0 #163f99, 0 6px 12px rgba(0,0,0,0.4), inset 0 2px 0 rgba(255,255,255,0.35); }
+.pbtn.drift.charging-b { background: linear-gradient(180deg, #4fc8ff, #1f9be0); }
+.pbtn.drift.charging-o { background: linear-gradient(180deg, #ffb340, #ff8a00); box-shadow: 0 8px 0 #b35f00, 0 14px 24px rgba(0,0,0,0.4); }
+.pbtn.brake, .pbtn.arrow { background: linear-gradient(180deg, #2b3256 0%, #1d2240 100%); border: 3px solid #3a4270; box-shadow: 0 7px 0 #0e1124, 0 12px 20px rgba(0,0,0,0.35), inset 0 2px 0 rgba(255,255,255,0.12); }
+.pbtn.brake.down, .pbtn.arrow.down { box-shadow: 0 2px 0 #0e1124, inset 0 2px 0 rgba(255,255,255,0.12); }
+.card { border-radius: 16px; box-shadow: 0 6px 0 rgba(0,0,0,0.35), 0 10px 18px rgba(0,0,0,0.3); text-shadow: 0 1px 2px rgba(0,0,0,0.45); }
+.card .ic { font-size: 34px; line-height: 1; text-align: center; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35)); }

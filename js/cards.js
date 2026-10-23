@@ -64,7 +64,7 @@ export function receive(k, kind) {
     case 'oil': k.spinT = Math.max(k.spinT, 1); break;
     case 'drunk': k.drunkT = 3; break;
     case 'invert': k.invertT = 4; break;
-    case 'handbrake': k.stopT = Math.max(k.stopT, 2); break;
+    case 'handbrake': k.stopT = Math.max(k.stopT, 2); k.clampT = 2; break;   // ganascia gialla sulla ruota
     case 'mini': k.miniT = 5; break;
     case 'slow': k.slowT = 3; break;
     case 'call': k.callT = 8; break;                        // finisce prima, appena rifiuta la chiamata
@@ -79,8 +79,8 @@ export function applySelf(k, id) {
   switch (id) {
     case 'turbo': giveBoost(k, 2, 'orange'); return true;
     case 'superturbo': giveBoost(k, 5, 'orange'); return true;
-    case 'shield': k.shieldT = 10; return true;
-    case 'supershield': k.shieldT = 20; return true;
+    case 'shield': k.shieldT = Math.max(k.shieldT, 10); return true;
+    case 'supershield': k.shieldT = 20; k.goldT = 20; return true;   // bolla dorata
     case 'mirror': k.mirror = 1; k.mirrorT = 15; return true;
     case 'magnet': giveBoost(k, 3, 'blue'); return true;
   }

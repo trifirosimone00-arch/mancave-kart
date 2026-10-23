@@ -1,6 +1,6 @@
 // Fisica arcade dei kart, stile Mario Kart: accelerazione automatica,
 // derapata con mini-turbo, turbo alla partenza, salto con acrobazia.
-import { locate, groundHeight, zoneAt } from './track.js';
+import { locate, groundHeight, zoneAt, kartBlocked, solidPush } from './track.js';
 
 export const MAX_SPEED = 30;          // ~108 km/h nel tachimetro (x3.6)
 const ACCEL = 15;
@@ -24,7 +24,7 @@ export function createKart(track, slot, gridIndex, player) {
     prevDrift: false, events: [], bumpCD: 0, grass: false,
     // effetti delle carte (secondi rimasti)
     shieldT: 0, mirror: 0, mirrorT: 0, ghostT: 0, invertT: 0, stopT: 0, miniT: 0, slowT: 0, fogT: 0, bombT: 0,
-    drunkT: 0, callT: 0, slowmoT: 0, copT: 0,
+    drunkT: 0, callT: 0, slowmoT: 0, copT: 0, clampT: 0, goldT: 0,
     contacts: [], shX: 0, shZ: 0, shoveCD: 0,
   });
   return k;
@@ -142,7 +142,7 @@ export function stepKart(track, k, input, dt, phase) {
 
 // timer degli effetti; la bomba esplode a chi ce l'ha quando arriva a zero
 function tickEffects(k, dt) {
-  for (const f of ['shieldT', 'ghostT', 'invertT', 'stopT', 'miniT', 'slowT', 'fogT', 'drunkT', 'callT', 'slowmoT', 'copT']) if (k[f] > 0) k[f] = Math.max(0, k[f] - dt);
+  for (const f of ['shieldT', 'ghostT', 'invertT', 'stopT', 'miniT', 'slowT', 'fogT', 'drunkT', 'callT', 'slowmoT', 'copT', 'clampT', 'goldT']) if (k[f] > 0) k[f] = Math.max(0, k[f] - dt);
   if (k.mirrorT > 0) { k.mirrorT -= dt; if (k.mirrorT <= 0) { k.mirrorT = 0; k.mirror = 0; } }
   if (k.bombT > 0) {
     k.bombT -= dt;
@@ -175,7 +175,23 @@ function move(track, k, dt, fx, fz) {
   const f = Math.exp(-7 * dt);
   k.shX = (k.shX || 0) * f; k.shZ = (k.shZ || 0) * f;
   if (k.shoveCD > 0) k.shoveCD -= dt;
-  k.x += vx * dt; k.z += vz * dt;
+  // mobili solidi (gambe di tavoli e divano...): se il passo finisce dentro, scivolo lungo il bordo o mi fermo
+  const nx = k.x + vx * dt, nz = k.z + vz * dt;
+  if (track.solid && kartBlocked(track, nx, nz, k.y) && !kartBlocked(track, k.x, k.z, k.y)) {
+    if (!kartBlocked(track, nx, k.z, k.y)) k.x = nx;
+    else if (!kartBlocked(track, k.x, nz, k.y)) k.z = nz;
+    else {
+      // contro uno spigolo: mi spingo via dal mobile e giro il muso, così si scivola via invece di restare incastrati
+      const pu = solidPush(track, k.x, k.z, k.y);
+      if (pu) {
+        k.x += pu.x * 0.35; k.z += pu.z * 0.35;
+        let d = Math.atan2(pu.x, pu.z) - k.yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+        if (Math.abs(d) < Math.PI * 0.75) k.yaw += Math.sign(d) * Math.min(Math.abs(d), 2.5 * dt);
+      }
+    }
+    if (k.bumpCD <= 0 && Math.abs(k.speed) > 6) { k.events.push('bump'); k.bumpCD = 0.5; }
+    k.speed *= 0.7;
+  } else { k.x = nx; k.z = nz; }
 
   const loc = locate(track, k.x, k.z, k.idx);
   k.prevS = k.s; k.idx = loc.idx; k.s = loc.s; k.lat = loc.lat;

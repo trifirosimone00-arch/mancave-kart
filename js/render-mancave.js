@@ -3,6 +3,7 @@
 // Luce calda della sera, ombre vere (calcolate una volta sola), riflessi sul parquet.
 import * as THREE from 'three';
 import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
+import { addNeon } from './render.js';
 
 // ------------------------------------------------------------------ modelli 3D gratuiti (Kenney, licenza CC0)
 // colori più vivi al posto di quelli pastello originali
@@ -294,7 +295,8 @@ function roundBox(w, h, d, r, seg = 3) {
   return g;
 }
 
-export function buildMancave(root, track) {
+export function buildMancave(root, track, opts = {}) {
+  const night = !!opts.night;
   const { pts, count, halfWidth: hw, wall } = track;
   const R = rng(23);
   const P = (i) => pts[((i % count) + count) % count];
@@ -308,6 +310,7 @@ export function buildMancave(root, track) {
 
   // mette un modello Kenney: (x, z) è il centro, y la base; scala uniforme (s) o su misura (w, h, d nelle misure del modello)
   const pending = [];
+  const solidObjs = [];        // mobili che fanno da ostacolo (gambe, sgabelli, casse...)
   function K(name, o) {
     const pr = loadK(name).then((m) => {
       if (!m) return null;
@@ -325,6 +328,7 @@ export function buildMancave(root, track) {
       const outer = new THREE.Group(); outer.position.set(o.x, o.y || 0, o.z); outer.rotation.y = o.ry || 0; outer.add(pivot);
       if (o.tilt) outer.rotation.x = o.tilt;
       root.add(outer);
+      if (!o.ghost) { outer.userData.kname = name; solidObjs.push(outer); }
       outer.userData.size = new THREE.Vector3(size.x * sx, size.y * sy, size.z * sz);
       if (o.then) o.then(outer);
       return outer;
@@ -340,8 +344,8 @@ export function buildMancave(root, track) {
   const ROAD = roadTex(R);
   const M = {
     road: std({ map: ROAD.map, bumpMap: ROAD.bump, bumpScale: 0.6, roughness: 0.62, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }),
-    rail: std({ color: '#f1efe9', roughness: 0.38 }),
-    railTop: std({ color: '#d63a2f', roughness: 0.4 }),
+    rail: new THREE.MeshPhysicalMaterial({ color: '#f4f2ec', roughness: 0.3, clearcoat: 0.6, clearcoatRoughness: 0.2 }),
+    railTop: new THREE.MeshPhysicalMaterial({ color: '#e0372b', roughness: 0.3, clearcoat: 0.8, clearcoatRoughness: 0.15 }),
     paint: std({ map: paintTex(R), color: '#f7dfa6', roughness: 0.92 }),
     ceiling: std({ color: '#fbf6ec', roughness: 0.95 }),
     white: std({ color: '#f3f1ec', roughness: 0.55 }),
@@ -493,9 +497,23 @@ export function buildMancave(root, track) {
       }
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.setIndex(id); g.computeVertexNormals();
       const m = new THREE.Mesh(g, M.rail); m.material.side = THREE.DoubleSide; root.add(m);
-      // bordo rosso in cima
-      const t = strip(a, b, sgn * wl - 0.35, sgn * wl + 0.35, RH2, M.railTop, 10, ok);
-      t.userData.noCast = true;
+      // bordo tondo rosso in cima (un tubo liscio che segue la barriera)
+      let seg = [];
+      const flush = () => {
+        if (seg.length >= 2) {
+          const curve = new THREE.CatmullRomCurve3(seg);
+          const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(4, seg.length * 3), 0.42, 8, false), M.railTop);
+          root.add(tube);
+        }
+        seg = [];
+      };
+      for (let i = a; i <= b; i += 3) {
+        if (!ok(i)) { flush(); continue; }
+        const p = P(i), l = sgn * wl;
+        seg.push(new THREE.Vector3(p.x + p.rx * l, Hr(Math.min(i, b), b) + RH2, p.z + p.rz * l));
+      }
+      if (ok(b)) { const p = P(b), l = sgn * wl; seg.push(new THREE.Vector3(p.x + p.rx * l, Hr(b, b) + RH2, p.z + p.rz * l)); }
+      flush();
     }
     // paletti ogni 6 unità
     const post = new THREE.BoxGeometry(0.9, RH2 + 0.4, 0.9);
@@ -541,7 +559,7 @@ export function buildMancave(root, track) {
   // ---------------------------------------------------------------- divano (nord): rialzato sulle gambe, la pista ci passa sotto
   {
     const x0 = -85, x1 = 60, z0 = 112, z1 = 172, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, lift = 17;
-    for (const x of [x0 + 6, cx, x1 - 6]) for (const z of [z0 + 5, z1 - 5]) cyl(1.8, 1.3, lift, std({ color: '#7a4a29', roughness: 0.5 }), x, lift / 2, z, 12);
+    for (const x of [x0 + 6, cx, x1 - 6]) for (const z of [z0 + 5, z1 - 5]) solidObjs.push(cyl(1.8, 1.3, lift, std({ color: '#7a4a29', roughness: 0.5 }), x, lift / 2, z, 12));
     box(x1 - x0 - 4, 2, z1 - z0 - 4, std({ color: '#7a4a29', roughness: 0.6 }), cx, lift - 1, cz);
     K('loungeSofa', { x: cx, z: cz, y: lift, w: x1 - x0, d: z1 - z0, h: 66, ry: Math.PI });
     K('pillowBlue', { x: x0 + 30, z: z1 - 22, y: lift + 26, s: 95, ry: Math.PI + 0.3, tilt: -0.2 });
@@ -636,6 +654,15 @@ export function buildMancave(root, track) {
     g.fillStyle = '#ffffff'; for (const [x, y, r] of [[50, 60, 18], [72, 52, 22], [96, 62, 16], [180, 90, 14], [198, 84, 18], [216, 92, 12]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
     g.fillStyle = '#5fbf5a'; g.beginPath(); g.moveTo(0, 256); g.quadraticCurveTo(70, 170, 140, 220); g.quadraticCurveTo(200, 180, 256, 210); g.lineTo(256, 256); g.fill();
     g.fillStyle = '#e8d3a8'; for (let x = 8; x < 256; x += 34) { const h = 30 + (x * 37 % 40); g.fillRect(x, 256 - h, 22, h); g.fillStyle = '#c4534a'; g.fillRect(x - 2, 256 - h - 6, 26, 7); g.fillStyle = '#e8d3a8'; }
+    if (night) {
+      // di notte: cielo scuro, luna, stelle e finestre accese
+      const ng = g.createLinearGradient(0, 0, 0, 256); ng.addColorStop(0, '#060a1f'); ng.addColorStop(1, '#2a2350');
+      g.fillStyle = ng; g.fillRect(0, 0, 256, 256);
+      g.fillStyle = '#fff'; for (let i = 0; i < 60; i++) g.fillRect((i * 97) % 256, (i * 53) % 150, 1.5, 1.5);
+      g.fillStyle = '#fff6d8'; g.beginPath(); g.arc(196, 52, 18, 0, 7); g.fill();
+      g.fillStyle = '#12101e'; for (let x = 0; x < 256; x += 30) { const h = 60 + (x * 41 % 70); g.fillRect(x, 256 - h, 26, h); }
+      g.fillStyle = '#ffd56a'; for (let x = 4; x < 256; x += 30) for (let y = 120; y < 250; y += 12) if ((x * 7 + y * 3) % 5 < 2) g.fillRect(x, y, 5, 6);
+    }
     const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, y1 - y0), new THREE.MeshBasicMaterial({ map: toTex(c), toneMapped: false }));
     glass.position.set(-RX + 0.5, (y0 + y1) / 2, zc); glass.rotation.y = Math.PI / 2; glass.userData.noShadow = true; root.add(glass);
     box(3, 3, w + 6, M.white, -RX + 1.5, y0 - 1.5, zc); box(3, 3, w + 6, M.white, -RX + 1.5, y1 + 1.5, zc);
@@ -787,8 +814,8 @@ export function buildMancave(root, track) {
     track.obstacleMeshes = { vacuum: vac, cat };
   }
 
-  // ---------------------------------------------------------------- luci: pomeriggio pieno di sole, colori vivi
-  {
+  // ---------------------------------------------------------------- luci: pomeriggio pieno di sole, o sera con neon e lampade
+  if (!night) {
     root.add(new THREE.HemisphereLight('#ffffff', '#c89a6a', 0.85));
     const key = new THREE.DirectionalLight('#fff4e0', 2.7);
     key.position.set(-260, 380, 90); key.target.position.set(0, 0, 0);
@@ -800,6 +827,24 @@ export function buildMancave(root, track) {
     fill.position.set(300, 200, -200); fill.target.position.set(0, 0, 0);
     root.add(fill, fill.target);
     const barL = new THREE.PointLight('#ffc27a', 1.2, 200, 1); barL.position.set(170, 90, 0); root.add(barL);
+  } else {
+    root.add(new THREE.HemisphereLight('#6a5cff', '#1a1020', 0.5));
+    // luce della luna dalla finestra, con le ombre
+    const moon = new THREE.DirectionalLight('#8fa6ff', 1.1);
+    moon.position.set(-320, 300, 60); moon.target.position.set(0, 0, 0);
+    moon.castShadow = true;
+    const sc = moon.shadow.camera; sc.left = -250; sc.right = 250; sc.top = 230; sc.bottom = -230; sc.near = 150; sc.far = 900;
+    moon.shadow.mapSize.set(2048, 2048); moon.shadow.bias = -0.0004; moon.shadow.normalBias = 0.35;
+    root.add(moon, moon.target);
+    // lampade calde, LED viola dietro la TV, luce rosa del neon del bar
+    for (const [x, y, z, c, i] of [[84, 120, 158, '#ffcf8a', 2.4], [0, 70, -150, '#7b5cff', 2.6], [178, 110, 0, '#ff4fb0', 2.4], [-170, 60, -90, '#ffcf8a', 1.4], [0, 120, 20, '#5fd0ff', 1.0]]) {
+      const l = new THREE.PointLight(c, i, 320, 1); l.position.set(x, y, z); root.add(l);
+    }
+    // strisce LED lungo le pareti in basso
+    for (const [w, x, z, ry, c] of [[RX * 2, 0, RZ - 1.4, 0, '#ff3dbb'], [RX * 2, 0, -RZ + 1.4, 0, '#29e6ff'], [RZ * 2, RX - 1.4, 0, Math.PI / 2, '#b26bff'], [RZ * 2, -RX + 1.4, 0, Math.PI / 2, '#29e6ff']]) {
+      const led = box(w, 1.2, 0.6, new THREE.MeshBasicMaterial({ color: c, toneMapped: false }), x, 6.5, z, ry); led.userData.noShadow = true;
+    }
+    addNeon(root, track, 0.02);
   }
 
   // ombre: i mobili le proiettano, pavimento e pista le ricevono (calcolate una volta sola)
@@ -823,17 +868,68 @@ export function buildMancave(root, track) {
   }
   finalize();
   // i modelli arrivano dopo: quando ci sono tutti ricalcolo le ombre
-  track.ready = Promise.all(pending).then(() => { finalize(); if (root.userData.refresh) root.userData.refresh(); });
+  track.ready = Promise.all(pending).then(() => { finalize(); buildSolid(); if (root.userData.refresh) root.userData.refresh(); });
 
-  root.userData.fog = new THREE.Fog('#f7dfa6', 700, 1600);
-  root.userData.background = new THREE.Color('#f7dfa6');
+  // griglia dei mobili solidi: per ogni triangolo dei mobili segno le celle che copre con la sua fascia di altezza
+  function buildSolid() {
+    const cs = 1, x0 = -RX, z0 = -RZ, nx = Math.ceil(RX * 2 / cs), nz = Math.ceil(RZ * 2 / cs);
+    const cells = new Map();
+    const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+    root.updateMatrixWorld(true);
+    const mark = (ia, ib, ja, jb, y0, y1) => {
+      for (let j = ja; j <= jb; j++) for (let i = ia; i <= ib; i++) {
+        if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
+        const key = j * nx + i;
+        let sp = cells.get(key);
+        if (!sp) { sp = []; cells.set(key, sp); }
+        // unisco con una fascia che si sovrappone, così le liste restano corte
+        let merged = false;
+        for (let k = 0; k < sp.length; k += 2) if (sp[k] <= y1 + 0.2 && sp[k + 1] >= y0 - 0.2) { sp[k] = Math.min(sp[k], y0); sp[k + 1] = Math.max(sp[k + 1], y1); merged = true; break; }
+        if (!merged) sp.push(y0, y1);
+      }
+    };
+    for (const obj of solidObjs) obj.traverse((m) => {
+      if (!m.isMesh || !m.geometry || !m.geometry.attributes.position) return;
+      const pos = m.geometry.attributes.position, idx = m.geometry.index;
+      const n = idx ? idx.count : pos.count;
+      for (let t = 0; t < n; t += 3) {
+        for (let q = 0; q < 3; q++) v[q].fromBufferAttribute(pos, idx ? idx.getX(t + q) : t + q).applyMatrix4(m.matrixWorld);
+        const minX = Math.min(v[0].x, v[1].x, v[2].x), maxX = Math.max(v[0].x, v[1].x, v[2].x);
+        const minZ = Math.min(v[0].z, v[1].z, v[2].z), maxZ = Math.max(v[0].z, v[1].z, v[2].z);
+        const minY = Math.min(v[0].y, v[1].y, v[2].y), maxY = Math.max(v[0].y, v[1].y, v[2].y);
+        if (maxY < 0.3) continue;                              // cose stese per terra (tappeti)
+        if (maxX - minX > 12 && maxZ - minZ > 12 && maxY - minY < 1.5) continue;   // piani orizzontali grandi (sopra dei tavoli)
+        mark(Math.floor((minX - x0) / cs), Math.floor((maxX - x0) / cs), Math.floor((minZ - z0) / cs), Math.floor((maxZ - z0) / cs), minY, maxY);
+      }
+    });
+    // dove la pista sale sul tavolino il suo bordo non deve fermare il kart: tolgo quelle celle
+    const { pts, count, halfWidth: hw } = track;
+    for (let i = 0; i < count; i++) {
+      // solo dove si sale sopra un mobile (rampa e tavolino): altrove i mobili dentro la pista restano ostacoli
+      if (track.zone[i] !== 'ramp' && track.zone[i] !== 'table') continue;
+      const a = pts[i], b = pts[(i + 1) % count];
+      const w2 = track.wall + 1;
+      for (let u = 0; u < 1; u += 0.25) {                 // passi piccoli, così non resta nessuna cella scoperta
+        const px = a.x + (b.x - a.x) * u, pz = a.z + (b.z - a.z) * u;
+        for (let lat = -w2; lat <= w2; lat += 0.4) {
+          const ci = Math.floor((px + a.rx * lat - x0) / cs), cj = Math.floor((pz + a.rz * lat - z0) / cs);
+          cells.delete(cj * nx + ci);
+        }
+      }
+    }
+    track.solid = { x0, z0, cs, nx, nz, cells };
+  }
+
+  root.userData.fog = new THREE.Fog(night ? '#120d24' : '#f7dfa6', 700, 1600);
+  root.userData.background = new THREE.Color(night ? '#120d24' : '#f7dfa6');
   root.userData.toneMapping = THREE.ACESFilmicToneMapping;
-  root.userData.exposure = 1.05;
+  root.userData.exposure = night ? 1.25 : 1.05;
+  root.userData.night = night;
   root.userData.makeEnv = makeEnv;
 }
 
 // riflessi: una stanza finta (soffitto chiaro, finestra arancio, LED viola) da cui prendere la luce ambiente
-function makeEnv(renderer) {
+function makeEnv(renderer, night = false) {
   const pm = new THREE.PMREMGenerator(renderer);
   const sc = new THREE.Scene();
   const room = new THREE.Mesh(new THREE.BoxGeometry(100, 40, 100), [
@@ -844,8 +940,9 @@ function makeEnv(renderer) {
     new THREE.MeshBasicMaterial({ color: '#f2d9a0', side: THREE.BackSide }),   // nord
     new THREE.MeshBasicMaterial({ color: '#2f6fb3', side: THREE.BackSide }),   // sud
   ]);
+  if (night) room.material.forEach((m) => m.color.multiplyScalar(0.18));
   sc.add(room);
-  const panel = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 2.8, 2.5) }));
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ color: night ? new THREE.Color(0.6, 0.3, 1.2) : new THREE.Color(3, 2.8, 2.5) }));
   panel.rotation.x = Math.PI / 2; panel.position.y = 19.5; sc.add(panel);
   const win = new THREE.Mesh(new THREE.PlaneGeometry(30, 18), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.8, 2.2, 2.6) }));
   win.rotation.y = Math.PI / 2; win.position.x = -49.5; sc.add(win);

@@ -5,6 +5,8 @@ import { createMgPhone } from './mg-phone.js';
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#e8322b', '#ff8a00', '#ffcc00', '#2ec46b', '#1fb5c9', '#2f7bff', '#9b5cff', '#ff4fa3'];
 
+const CARD_ICON = { turbo: '🔥', superturbo: '🔥', shield: '🛡️', supershield: '🛡️', oil: '🛢️', drunk: '🍺', missile: '🚀', magnet: '🧲',
+  invert: '🔄', handbrake: '✋', mini: '🐜', call: '📞', police: '🚓', remote: '⏪', swap: '🔀', thief: '🦹', mirror: '🪞' };
 const store = {
   get(k, d) { try { const v = localStorage.getItem('mck-' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem('mck-' + k, JSON.stringify(v)); } catch (e) { /* niente */ } },
@@ -212,6 +214,7 @@ function onData(msg) {
   switch (msg.t) {
     case 'welcome':
       $('enter').disabled = false; $('join-err').textContent = '';
+      sendPhoto();
       if (st.view === 'join') show('wait');
       break;
     case 'full': $('join-err').textContent = 'La stanza è piena (massimo 4 piloti).'; $('enter').disabled = false; st.left = true; break;
@@ -407,8 +410,9 @@ function drawHand(s) {
     if (!id) { c.className = 'card empty'; c.disabled = true; el.appendChild(c); continue; }
     const def = CARDS[id];
     c.className = 'card ' + (def.rar === 'rara' ? 'rara' : def.rar === 'combo' ? 'combo' : '');
-    c.style.background = def.color;
-    c.innerHTML = '<span class="rar"></span><span class="nm"></span>';
+    c.style.background = `linear-gradient(160deg, rgba(255,255,255,0.28), rgba(255,255,255,0) 45%), ${def.color}`;
+    c.innerHTML = '<span class="rar"></span><span class="ic"></span><span class="nm"></span>';
+    c.querySelector('.ic').textContent = CARD_ICON[id] || '';
     c.querySelector('.rar').textContent = def.rar;
     c.querySelector('.nm').textContent = def.name;
     c.setAttribute('aria-label', `${def.name}: ${def.desc}`);
@@ -525,3 +529,34 @@ setInterval(() => { if (callOn && callEndAt && performance.now() - callEndAt < 3
 
 // la scelta si chiude da sola se non scegli
 setInterval(() => { if (picking && performance.now() - pickT > 7000) closePick(); }, 500);
+
+// ------------------------------------------------------------------ selfie: piccolo e quadrato, poi va al PC
+function sendPhoto() { const ph = store.get('photo', ''); if (ph) send2({ t: 'photo', data: ph }); }
+function drawSelfie() {
+  const ph = store.get('photo', ''), el = $('selfie-pic');
+  if (!el) return;
+  el.style.backgroundImage = ph ? `url(${ph})` : '';
+  el.classList.toggle('has', !!ph);
+}
+if ($('selfie-in')) {
+  $('selfie-in').onchange = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f), img = new Image();
+    img.onload = () => {
+      const S = 128, c = document.createElement('canvas'); c.width = S; c.height = S;
+      const g = c.getContext('2d'), m = Math.min(img.width, img.height);
+      // ritaglio quadrato al centro, un po' più in alto (dove sta la faccia)
+      g.drawImage(img, (img.width - m) / 2, Math.max(0, (img.height - m) / 2 - m * 0.08), m, m, 0, 0, S, S);
+      let data = c.toDataURL('image/jpeg', 0.72);
+      if (data.length > 38000) data = c.toDataURL('image/jpeg', 0.5);
+      store.set('photo', data);
+      URL.revokeObjectURL(url);
+      drawSelfie(); sendPhoto();
+      if (navigator.vibrate) navigator.vibrate(30);
+    };
+    img.src = url;
+    e.target.value = '';
+  };
+  drawSelfie();
+}

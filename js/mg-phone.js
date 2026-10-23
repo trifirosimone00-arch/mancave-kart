@@ -1,7 +1,7 @@
 // Minigiochi sul telefono. I giochi a riflessi girano qui (niente ritardo di rete):
 // al PC arriva solo lo stato (punti, fatto, eliminato, risposte).
 import {
-  GAMES, PIT_INTRO, PIT_COUNT, PIT_GO, TIE_INTRO, TIE_TAP, LAMPO, lampoNumbers, BALLOON_TAPS, CAN_FULL, SEM_READY, SEM_FOUL, semDelay, barRound, pmNumbers, chipPlan,
+  GAMES, PIT_INTRO, PIT_COUNT, PIT_GO, TIE_INTRO, TIE_TAP, LAMPO, lampoNumbers, lampoGomme, lampoVetro, lampoMemory, lampoConta, CONTA_COLORS, BALLOON_TAPS, CAN_FULL, SEM_READY, SEM_FOUL, semDelay, barRound, pmNumbers, chipPlan,
   makeMaze, mazeWall, duelPairOf, DUEL_NAMES,
 } from './minigames.js';
 import { CARDS } from './cards.js';
@@ -9,6 +9,7 @@ import { CARDS } from './cards.js';
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ANS_COLORS = ['#e8322b', '#2f7bff', '#ffb000', '#2ec46b'];
 const DOOR_COLORS = ['#e8322b', '#2f7bff', '#2ec46b'];
+const MEM_SYM = ['●', '▲', '■', '★'];   // simboli sui tasti del Memory (non solo colore)
 const now = () => performance.now();
 
 export function createMgPhone({ root, send, vib }) {
@@ -36,12 +37,11 @@ export function createMgPhone({ root, send, vib }) {
 
   // ---------------------------------------------------------------- avvio di un gioco
   function start(p) {
-    stopMic();
     g = { id: p.id, game: p.game, seed: p.seed, dur: p.dur, short: !!p.short, t0: now() - (p.t || 0) * 1000, s: {} };
     const s = g.s;
     if (g.game === 'barra') { s.score = 0; s.round = 0; g.roundAt = now() + 600; }
     if (g.game === 'pallone') s.n = 0;
-    if (g.game === 'lattina' || g.game === 'regata' || g.game === 'labirinto') s.p = 0;
+    if (g.game === 'lattina' || g.game === 'labirinto') s.p = 0;
     if (g.game === 'patatine') { s.score = 0; g.plan = chipPlan(g.seed, g.dur); g.taken = new Set(); }
     if (g.game === 'piumeno') { s.best = 0; s.cur = 0; g.nums = pmNumbers(g.seed); g.i = 0; }
     if (g.game === 'porta' || g.game === 'quiz' || g.game === 'semaforo') { s.ans = {}; s.at = {}; }
@@ -66,9 +66,6 @@ export function createMgPhone({ root, send, vib }) {
     } else if (k === 'pallone' || k === 'lattina') {
       body.innerHTML = `<div class="mg-split"><div class="${k === 'pallone' ? 'balloon' : 'can'}" id="mg-vis"><i></i></div><div class="mg-big" id="mg-score">0%</div></div>
         <button class="mg-btn" type="button" id="mg-act">${k === 'pallone' ? 'TOCCA!' : 'SCUOTI!'}<small>${k === 'lattina' ? 'o tocca a raffica' : 'più veloce che puoi'}</small></button>`;
-    } else if (k === 'regata') {
-      body.innerHTML = `<div class="mg-split"><div class="sink"><i class="boat" id="mg-vis">⛵</i><i class="flag">🏁</i></div><div class="mg-big" id="mg-score">0%</div><div class="mg-sub" id="mg-mic">Tocca il tasto per usare il microfono</div></div>
-        <button class="mg-btn" type="button" id="mg-act">SOFFIA!<small id="mg-act-sub">tocca per attivare il microfono</small></button>`;
     } else if (k === 'labirinto') {
       body.innerHTML = `<canvas class="maze" id="mg-maze"></canvas><div class="maze-side"><div class="mg-big" id="mg-score">0%</div><div class="mg-sub" id="mg-tilt">Inclina il telefono</div>
         <button class="btn ghost" type="button" id="mg-sensor">Centra</button><button class="btn ghost" type="button" id="mg-flip">Inverti</button></div>`;
@@ -106,7 +103,6 @@ export function createMgPhone({ root, send, vib }) {
     if (k === 'barra') tap(act, barStop);
     if (k === 'pallone') tap(act, () => { if (over() || g.s.popT != null) return; g.s.n++; if (g.s.n % 5 === 0) buzz(8); if (g.s.n >= BALLOON_TAPS) { g.s.popT = Math.round(elapsed() * 1000); g.s.done = 1; buzz([80, 40, 200]); } report(); });
     if (k === 'lattina') tap(act, () => addFill(1.4));
-    if (k === 'regata') tap(act, () => { if (!g.mic && !g.micTried) startMic(); else addFill(0.9); });
     if (k === 'semaforo') tap(act, semTap);
     if (k === 'patatine') root.querySelectorAll('#mg-chips button').forEach(b => tap(b, () => chipTap(Number(b.dataset.c))));
     if (k === 'piumeno') { tap($('#mg-up'), () => pmGuess(true)); tap($('#mg-down'), () => pmGuess(false)); }
@@ -140,48 +136,12 @@ export function createMgPhone({ root, send, vib }) {
     report(true);
   }
 
-  // ---------------------------------------------------------------- lattina e regata: riempi fino a 100
+  // ---------------------------------------------------------------- lattina: riempi fino a 100
   function addFill(v) {
     if (!g || over() || g.s.popT != null) return;
     g.s.p = Math.min(CAN_FULL, g.s.p + v);
-    if (g.s.p >= CAN_FULL) { g.s.popT = Math.round(elapsed() * 1000); g.s.done = 1; buzz([80, 40, 200]); stopMic(); }
+    if (g.s.p >= CAN_FULL) { g.s.popT = Math.round(elapsed() * 1000); g.s.done = 1; buzz([80, 40, 200]); }
     report();
-  }
-
-  // microfono (Regata): più forte soffi, più va veloce la barchetta
-  async function startMic() {
-    g.micTried = true;
-    const gg = g;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-      if (g !== gg || over()) { stream.getTracks().forEach(t => t.stop()); return; }
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      await ctx.resume();
-      const an = ctx.createAnalyser();
-      an.fftSize = 1024;
-      ctx.createMediaStreamSource(stream).connect(an);
-      g.mic = { stream, ctx, an, buf: new Float32Array(an.fftSize), base: 1, t0: now() };
-      $('#mg-mic').textContent = 'Soffia forte nel microfono!';
-      $('#mg-act-sub').textContent = 'oppure tocca per remare';
-    } catch (e) {
-      $('#mg-mic').textContent = 'Microfono non disponibile: tocca il tasto per remare';
-      $('#mg-act-sub').textContent = 'tocca a raffica per remare';
-    }
-  }
-  function micLevel() {
-    const m = g.mic;
-    m.an.getFloatTimeDomainData(m.buf);
-    let sum = 0;
-    for (let i = 0; i < m.buf.length; i++) sum += m.buf[i] * m.buf[i];
-    const rms = Math.sqrt(sum / m.buf.length);
-    if (now() - m.t0 < 600) m.base = Math.min(m.base, rms);    // rumore di fondo della stanza
-    return Math.max(0, rms - m.base - 0.03);
-  }
-  function stopMic() {
-    if (g && g.mic) {
-      try { g.mic.stream.getTracks().forEach(t => t.stop()); g.mic.ctx.close(); } catch (e) { /* niente */ }
-      g.mic = null;
-    }
   }
 
   // ---------------------------------------------------------------- Labirinto
@@ -403,11 +363,6 @@ export function createMgPhone({ root, send, vib }) {
       else vis.firstChild.style.height = `${Math.round(f * 100)}%`;
       vis.classList.toggle('pop', s.popT != null);
       $('#mg-score').textContent = s.popT != null ? (k === 'pallone' ? 'BOOM!' : 'SPLASH!') : `${Math.round(f * 100)}%`;
-    } else if (k === 'regata') {
-      if (g.mic && !over()) { const lv = micLevel(); if (lv > 0) addFill(Math.min(15, lv * 60) * dt); }
-      $('#mg-vis').style.left = `${Math.min(88, s.p * 0.88)}%`;
-      $('#mg-score').textContent = s.popT != null ? 'ARRIVATO!' : `${Math.round(s.p)}%`;
-      if (over()) stopMic();
     } else if (k === 'labirinto') {
       if (!over()) mazeStep(dt);
       mazeDraw();
@@ -469,7 +424,7 @@ export function createMgPhone({ root, send, vib }) {
       });
     }
     // fine tempo: blocco il gioco
-    if (timed() && lt >= g.dur && !s.done) { s.done = 1; stopMic(); report(true); }
+    if (timed() && lt >= g.dur && !s.done) { s.done = 1; report(true); }
     report();
   }
   requestAnimationFrame(frame);
@@ -483,7 +438,7 @@ export function createMgPhone({ root, send, vib }) {
     const lampoOn = !P && status.lampo && !status.lampo.done;
     $('#mg-skip').classList.toggle('hidden', !(P && P.canSkip));
     $('#mg-count').classList.toggle('hidden', !(P && (P.stage === 'count' || P.stage === 'go' || P.stage === 'done')));
-    if (!P) { stopMic(); if (!lampoOn) { g = null; built = ''; } drawOffer(null); updateLampo(lampoOn ? status.lampo : null); return; }
+    if (!P) { if (!lampoOn) { g = null; built = ''; } drawOffer(null); updateLampo(lampoOn ? status.lampo : null); return; }
     lampo = null;
     if (P.canSkip) {
       const btn = $('#mg-skip');
@@ -492,7 +447,7 @@ export function createMgPhone({ root, send, vib }) {
       if (skipWant && (skipWant.id !== P.id || skipWant.stage !== P.stage || P.skipped)) skipWant = null;
     }
     const G = GAMES[P.game];
-    $('#mg-tag').textContent = `PIT STOP ${P.n}${P.of ? ' di ' + P.of : ''}`;
+    $('#mg-tag').textContent = P.grid ? 'GRIGLIA DI PARTENZA' : `PIT STOP ${P.n}${P.of ? ' di ' + P.of : ''}`;
     $('#mg-title').textContent = G.title;
     const stageEl = $('#mg-stage'), body = $('#mg-body'), done = $('#mg-done');
     if (P.stage === 'play' && (!g || g.id !== P.id)) start(P);
@@ -521,7 +476,6 @@ export function createMgPhone({ root, send, vib }) {
         stageEl.innerHTML = `<p class="mg-help">Spareggio tra ${esc(P.tie.slots.map(nameOf).join(' e '))}</p><p class="mg-sub">Guarda la TV</p>`;
       }
     } else {
-      stopMic();
       body.classList.add('hidden'); done.classList.add('hidden');
       stageEl.className = 'mg-stage';
       const me = P.me;
@@ -550,6 +504,7 @@ export function createMgPhone({ root, send, vib }) {
     if (!L) { lampo = null; return; }
     if (!lampo || lampo.id !== L.id) {
       lampo = { id: L.id, mission: L.mission, seed: L.seed, n: 0, t0: now() - (L.t || 0) * 1000, nums: lampoNumbers(L.seed), next: 1, p: 0, barAt: now() + 400, doneAt: 0, sentAt: 0 };
+      lampoInit();
       buildLampo();
     }
     $('#mg-tag').textContent = `MINIGIOCO LAMPO · PIT STOP ${L.n}${L.of ? ' di ' + L.of : ''}`;
@@ -564,11 +519,22 @@ export function createMgPhone({ root, send, vib }) {
       body.innerHTML = `<div class="mg-split"><div class="mg-big" id="lp-score"></div><div class="mg-sub">${m === 'shake' ? 'Scuoti il telefono o tocca a raffica' : 'Più veloce che puoi!'}</div></div><button class="mg-btn" type="button" id="lp-act">${m === 'tap' ? 'TOCCA!' : 'SCUOTI!'}</button>`;
     } else if (m === 'barra') {
       body.innerHTML = `<div class="bar-wrap"><div class="bar"><i class="bar-g"></i><i class="bar-c"></i></div><div class="mg-big" id="lp-score">Fermala nel verde</div></div><button class="mg-btn" type="button" id="lp-act">STOP</button>`;
+    } else if (m === 'gomme') {
+      body.innerHTML = `<div class="lp-wheels">${lampo.gw.map((bolts, w) => `<div class="lp-wheel${w === 0 ? ' cur' : ''}" data-w="${w}"><span class="lp-hub">${w + 1}</span>${bolts.map(b => `<button type="button" class="lp-bolt" data-w="${w}" data-n="${b.n}" style="--a:${b.ang.toFixed(1)}deg">${b.n}</button>`).join('')}</div>`).join('')}</div><div class="mg-big side" id="lp-score">1/4</div>`;
+    } else if (m === 'vetro') {
+      body.innerHTML = `<div class="lp-glass" id="lp-glass" style="--cols:${LAMPO.vetro.cols}">${lampo.dirt.map((d, i) => `<i data-i="${i}" style="opacity:${d}"></i>`).join('')}</div><div class="mg-big side" id="lp-score">0%</div>`;
+    } else if (m === 'memory') {
+      body.innerHTML = `<div class="lp-mem">${ANS_COLORS.map((c, i) => `<button type="button" data-c="${i}" style="--c:${c}" aria-label="Colore ${i + 1}">${MEM_SYM[i]}</button>`).join('')}</div><div class="mg-big side" id="lp-score">Guarda!</div>`;
+    } else if (m === 'conta') {
+      body.innerHTML = `<div class="lp-conta" id="lp-conta"></div><div class="mg-big side" id="lp-score"></div>`;
     } else {
       body.innerHTML = `<div class="lp-nums">${lampo.nums.map(n => `<button type="button" data-n="${n}">${n}</button>`).join('')}</div><div class="mg-big side" id="lp-score">1</div>`;
     }
     const tap = (el, fn) => el && el.addEventListener('pointerdown', (e) => { e.preventDefault(); fn(e); });
     tap($('#lp-act'), lampoAct);
+    root.querySelectorAll('.lp-bolt').forEach(b => tap(b, () => gommeTap(b)));
+    root.querySelectorAll('.lp-mem button').forEach(b => tap(b, () => memTap(Number(b.dataset.c))));
+    if (m === 'vetro') bindGlass();
     root.querySelectorAll('.lp-nums button').forEach(b => tap(b, () => {
       if (lampo.doneAt) return;
       const n = Number(b.dataset.n);
@@ -588,6 +554,123 @@ export function createMgPhone({ root, send, vib }) {
       else { buzz([150]); lampo.barAt = now() + 600; }
     }
   }
+  // dati della missione (uguali per tutti grazie al seed)
+  function lampoInit() {
+    const L = lampo;
+    if (L.mission === 'gomme') { L.gw = lampoGomme(L.seed); L.gi = 0; L.gn = 1; L.lock = 0; }
+    if (L.mission === 'vetro') { L.dirt = lampoVetro(L.seed); L.dirt0 = L.dirt.reduce((a, v) => a + v, 0); L.last = null; }
+    if (L.mission === 'memory') { L.seq = lampoMemory(L.seed); L.memAt = now() + 700; L.memIn = 0; L.press = null; L.memMsg = ''; }
+    if (L.mission === 'conta') { L.cr = 0; L.scene = lampoConta(L.seed, 0); L.cAt = now() + 300; L.cPhase = ''; L.cMsg = ''; }
+  }
+
+  // ---- Cambio gomme: bulloni 1-2-3 della ruota 1, poi ruota 2… (un errore = mezzo secondo fermo)
+  function gommeTap(b) {
+    const L = lampo;
+    if (!L || L.doneAt || now() < L.lock || b.classList.contains('ok')) return;
+    const w = Number(b.dataset.w), n = Number(b.dataset.n);
+    if (w === L.gi && n === L.gn) {
+      b.classList.add('ok'); buzz(15);
+      L.gn++;
+      if (L.gn > LAMPO.gomme.bolts) {
+        const wh = root.querySelector(`.lp-wheel[data-w="${w}"]`);
+        wh.classList.remove('cur'); wh.classList.add('ok');
+        L.gi++; L.gn = 1;
+        if (L.gi >= LAMPO.gomme.wheels) { lampoFinish(); return; }
+        root.querySelector(`.lp-wheel[data-w="${L.gi}"]`).classList.add('cur');
+      }
+    } else {
+      buzz([150]); L.lock = now() + 600;
+      b.classList.add('no'); setTimeout(() => b.classList.remove('no'), 600);
+    }
+  }
+
+  // ---- Lava il parabrezza: strofina col dito, ogni passata toglie sporco alla casella e a quelle vicine
+  function bindGlass() {
+    const gl = $('#lp-glass');
+    const { cols, rows } = LAMPO.vetro;
+    // f = quanta strada ha fatto il dito (1 = 12 px): più strofini, più pulisci
+    const rub = (x, y, f) => {
+      // elementFromPoint funziona anche col telefono ruotato (html.rot)
+      const el = document.elementFromPoint(x, y);
+      if (!el || el.parentNode !== gl) return;
+      const i = Number(el.dataset.i), cx = i % cols, cy = Math.floor(i / cols);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+        const j = ny * cols + nx, d = lampo.dirt[j];
+        if (!d) continue;
+        lampo.dirt[j] = Math.max(0, d - f * (dx || dy ? 0.015 : 0.035));
+        if (lampo.dirt[j] < 0.05) lampo.dirt[j] = 0;
+        gl.children[j].style.opacity = lampo.dirt[j].toFixed(2);
+      }
+    };
+    const move = (e) => {
+      if (!lampo || lampo.doneAt || lampo.mission !== 'vetro') return;
+      const L = lampo, p = { x: e.clientX, y: e.clientY };
+      // tra un evento e l'altro il dito può fare tanta strada: riempio i punti in mezzo
+      const a = L.last || p, dist = Math.hypot(p.x - a.x, p.y - a.y), steps = Math.max(1, Math.ceil(dist / 12));
+      const f = Math.min(1, dist / steps / 12);
+      if (f > 0) for (let k = 1; k <= steps; k++) rub(a.x + (p.x - a.x) * k / steps, a.y + (p.y - a.y) * k / steps, f);
+      L.last = p;
+      const left = L.dirt.reduce((s, v) => s + v, 0);
+      if (1 - left / (L.dirt0 || 1) >= LAMPO.vetro.clean) { for (const c of gl.children) c.style.opacity = 0; lampoFinish(); }
+    };
+    gl.addEventListener('pointerdown', (e) => { e.preventDefault(); lampo.last = null; move(e); });
+    gl.addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') move(e); });
+    const up = () => { if (lampo) lampo.last = null; };
+    gl.addEventListener('pointerup', up); gl.addEventListener('pointercancel', up);
+  }
+
+  // ---- Memory veloce: la sequenza si accende, poi la ripeti (se sbagli la rivedi uguale)
+  const MEM_STEP = 0.55, MEM_ON = 0.4;
+  function memTap(c) {
+    const L = lampo;
+    if (!L || L.doneAt || now() < L.memAt + L.seq.length * MEM_STEP * 1000) return;   // sta ancora mostrando
+    L.press = { c, at: now() };
+    if (c === L.seq[L.memIn]) {
+      buzz(15); L.memIn++; L.memMsg = '';
+      if (L.memIn >= L.seq.length) lampoFinish();
+    } else {
+      buzz([150]); L.memIn = 0; L.memMsg = 'Sbagliato! Riguarda';
+      L.memAt = now() + 900;
+    }
+  }
+  function memFrame() {
+    const L = lampo, t = (now() - L.memAt) / 1000, showing = t < L.seq.length * MEM_STEP;
+    let lit = -1;
+    if (showing && t >= 0 && t % MEM_STEP < MEM_ON) lit = L.seq[Math.floor(t / MEM_STEP)];
+    if (!showing && L.press && now() - L.press.at < 180) lit = L.press.c;
+    root.querySelectorAll('.lp-mem button').forEach((b, i) => { b.classList.toggle('on', i === lit); b.classList.toggle('wait', showing); });
+    $('#lp-score').textContent = L.memMsg && showing ? L.memMsg : showing ? 'Guarda!' : `${L.memIn}/${L.seq.length}`;
+  }
+
+  // ---- Conta i kart: scena per pochi secondi, poi la domanda (sbagli = penalità e scena nuova)
+  function contaFrame() {
+    const L = lampo, box = $('#lp-conta'), sc = L.scene, col = CONTA_COLORS[sc.ask];
+    const t = (now() - L.cAt) / 1000;
+    const phase = t < 0 ? 'wait' : t < LAMPO.conta.show ? 'scene' : 'ask';
+    if (phase !== L.cPhase) {
+      L.cPhase = phase;
+      if (phase === 'wait') box.innerHTML = `<p class="lp-msg">${esc(L.cMsg || 'Pronti…')}</p>`;
+      else if (phase === 'scene') box.innerHTML = `<div class="lp-scene">${sc.karts.map(k => `<i class="lp-kart${k.flip ? ' flip' : ''}" style="left:${k.x.toFixed(1)}%;top:${k.y.toFixed(1)}%;--c:${CONTA_COLORS[k.c].hex}"><b></b><em></em></i>`).join('')}</div>`;
+      else {
+        box.innerHTML = `<div class="lp-q"><p>Quanti kart <b style="color:${col.hex}">${col.id}</b>?</p><div class="lp-ans">${sc.answers.map(a => `<button type="button" data-a="${a}">${a}</button>`).join('')}</div></div>`;
+        box.querySelectorAll('.lp-ans button').forEach(b => b.addEventListener('pointerdown', (e) => { e.preventDefault(); contaAnswer(Number(b.dataset.a), b); }));
+      }
+    }
+    $('#lp-score').textContent = phase === 'scene' ? `${Math.max(1, Math.ceil(LAMPO.conta.show - t))}` : phase === 'ask' ? '?' : '…';
+  }
+  function contaAnswer(a, b) {
+    const L = lampo;
+    if (!L || L.doneAt || L.cPhase !== 'ask') return;
+    if (a === L.scene.want) { b.classList.add('ok'); lampoFinish(); return; }
+    buzz([150]);
+    L.cMsg = `Sbagliato! Erano ${L.scene.want}. Nuova scena…`;
+    L.cr++; L.scene = lampoConta(L.seed, L.cr);
+    L.cAt = now() + 1200;               // penalità
+    L.cPhase = '';
+  }
+
   function lampoFinish() {
     lampo.doneAt = now();
     buzz([60, 40, 160]);
@@ -606,6 +689,10 @@ export function createMgPhone({ root, send, vib }) {
     if (m === 'shake') $('#lp-score').textContent = `${Math.min(100, Math.round(100 * L.p / LAMPO.shake.n))}%`;
     if (m === 'barra') { const gz = $('.bar-g'), c = $('.bar-c'); gz.style.left = '39%'; gz.style.width = '22%'; c.style.left = `${50 + lampoBar() * 50}%`; }
     if (m === 'num') $('#lp-score').textContent = L.next <= 6 ? String(L.next) : '✓';
+    if (m === 'gomme') $('#lp-score').textContent = `${L.gi + 1}/${LAMPO.gomme.wheels}`;
+    if (m === 'vetro') $('#lp-score').textContent = `${Math.round(100 * (1 - L.dirt.reduce((a, v) => a + v, 0) / (L.dirt0 || 1)))}%`;
+    if (m === 'memory') memFrame();
+    if (m === 'conta') contaFrame();
   }
 
   // premio del 1°: scegli 2 carte su 3

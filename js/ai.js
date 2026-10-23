@@ -1,5 +1,6 @@
 // Piloti guidati dal computer (CPU).
 import { CARDS } from './cards.js';
+import { kartBlocked, groundHeight, solidPush } from './track.js';
 
 export const CPU_LEVELS = {
   facile:    { label: 'Facile',    speed: 0.84, look: 9,  drift: false, start: 0.1, cardDelay: [6, 12], noise: 0.25 },
@@ -55,6 +56,28 @@ export function cpuInput(track, k, brain, dt, ctx) {
   if (brain.laneT <= 0) { brain.lane = (Math.random() - 0.5) * 8; brain.laneT = 2 + Math.random() * 3; }
 
   const look = Math.round(L.look * (0.6 + Math.max(0, k.speed) / 30 * 0.6) / track.ds * 1.5);
+  // mobili in mezzo alla pista: scelgo una corsia la cui linea dritta dal kart al punto di mira sia libera
+  if (track.solid) {
+    const clear = (lane) => {
+      const q = track.pts[(k.idx + look) % track.count];
+      const tx = q.x + q.rx * lane, tz = q.z + q.rz * lane;
+      const d = Math.hypot(tx - k.x, tz - k.z), n = Math.max(2, Math.ceil(d / 1.5));
+      for (let i = 1; i <= n; i++) {
+        const u = i / n, x = k.x + (tx - k.x) * u, z = k.z + (tz - k.z) * u;
+        if (kartBlocked(track, x, z, k.y + (groundHeight(track, q.s, lane) - k.y) * u)) return false;
+      }
+      return true;
+    };
+    if (!clear(brain.lane)) {
+      let best = null;
+      for (let d = 1; d <= 22 && best == null; d++) for (const sg of [1, -1]) {
+        const ln = brain.lane + sg * d * 0.5;
+        if (Math.abs(ln) > track.wall - 2.4) continue;
+        if (clear(ln)) { best = ln; break; }
+      }
+      if (best != null) { brain.lane = best; brain.laneT = 1.2; }
+    }
+  }
   const p = track.pts[(k.idx + look) % track.count];
   const tx = p.x + p.rx * brain.lane, tz = p.z + p.rz * brain.lane;
   const ang = angleTo(k, tx, tz) + (Math.random() - 0.5) * L.noise;
@@ -76,10 +99,23 @@ export function cpuInput(track, k, brain, dt, ctx) {
   // incastrato contro il muro o girato al contrario: retromarcia
   if (brain.reverseT > 0) {
     brain.reverseT -= dt;
-    input.brake = true; input.steer = -input.steer; input.drift = false;
+    input.brake = true; input.drift = false;
+    // in retromarcia giro il muso lontano dal mobile (o dal muro) che mi blocca
+    input.steer = brain.revSteer != null ? brain.revSteer : -input.steer;
+    if (brain.reverseT <= 0) brain.revSteer = null;
   } else {
     brain.stuckT = k.speed < 3 ? brain.stuckT + dt : 0;
-    if (brain.stuckT > 1.5 || k.wrongWayT > 1.5) { brain.reverseT = 1; brain.stuckT = 0; }
+    const pu = track.solid ? solidPush(track, k.x, k.z, k.y, 3.5) : null;
+    if ((pu && brain.stuckT > 0.6) || brain.stuckT > 1.5 || k.wrongWayT > 1.5) {
+      brain.reverseT = pu ? 0.9 : 1; brain.stuckT = 0;
+      if (pu) {
+        // il mobile è dalla parte opposta di pu: sterzo in retro in modo che il muso si allontani, poi cambio corsia
+        const side = Math.sin(k.yaw) * pu.z - Math.cos(k.yaw) * pu.x;   // >0: il mobile è a destra
+        brain.revSteer = side > 0 ? 1 : -1;
+        brain.lane = Math.max(-(track.wall - 3), Math.min(track.wall - 3, k.lat + (side > 0 ? -6 : 6)));
+        brain.laneT = 2.5;
+      }
+    }
   }
 
   // carte

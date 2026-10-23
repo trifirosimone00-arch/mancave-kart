@@ -43,6 +43,15 @@ const store = {
 };
 
 const TRACK_IDS = TRACK_LIST.map(t => t.id);
+const MODES = {
+  singola: { label: 'Gara singola', short: 'Singola' },
+  gp: { label: 'Gran Premio', short: 'Gran Premio', races: 4 },
+  tempo: { label: 'Contro il tempo', short: 'Contro il tempo' },
+  torneo: { label: 'Torneo Mancave', short: 'Torneo', races: 3 },
+};
+const PTS = [10, 7, 5, 3, 2, 1];  // punti per posizione (Gran Premio, Torneo, classifica storica)
+const MG_PTS = [3, 2, 1];         // (Torneo) punti per i minigiochi
+const GP_NEXT_MS = 12000;         // dopo quanto parte da sola la gara successiva
 const startTrack = TRACK_IDS.includes(params.get('track')) ? params.get('track') : (TRACK_IDS.includes(localStorage.getItem('mck-track-id')) ? localStorage.getItem('mck-track-id') : 'prova');
 let track = buildTrack(startTrack);
 const view = createRenderer($('game'), $('hud'), track);
@@ -74,6 +83,10 @@ const W = {                       // stato della stanza (sul PC principale è la
 W.mgShort = !!store.get('mg-short', false);
 // tipo di minigiochi ai pit stop: 'phone' (solo telefono), 'kart' (solo col kart), 'mix' (misti)
 W.mgType = ['phone', 'kart', 'mix'].includes(store.get('mg-type', 'mix')) ? store.get('mg-type', 'mix') : 'mix';
+// modalità di gioco (vedi "modalità" più sotto): gara singola, Gran Premio, contro il tempo, torneo
+W.mode = MODES[store.get('mode', 'singola')] ? store.get('mode', 'singola') : 'singola';
+W.gp = null;                      // serie in corso (Gran Premio / Torneo): gara, punti, classifica
+W.rec = null;                     // (contro il tempo) record battuti nell'ultima gara
 W.quizCats = (store.get('quiz-cats', QUIZ_CATS) || []).filter(c => QUIZ_CATS.includes(c));
 // la categoria Musica è nuova: la accendo una volta anche a chi aveva già salvato le sue scelte
 if (!store.get('quiz-musica-on', false)) { if (!W.quizCats.includes('Musica')) W.quizCats.push('Musica'); store.set('quiz-cats', W.quizCats); store.set('quiz-musica-on', true); }
@@ -264,6 +277,7 @@ function pushStatus(force) {
       place: MASTER ? (k ? k.place : 0) : (wk ? wk.place : 0), lap: k ? Math.max(1, Math.min(W.laps, k.lapCount)) : 0,
       finished: k ? k.finished : false, air: k ? k.air : false,
       results: W.phase === 'podium' ? W.results : undefined,
+      mode: W.mode, gp: W.gp ? { race: W.gp.race, of: W.gp.of } : undefined,
       pit: pitInfo(l.slot), offer: offerInfo(l.slot), lampo: lampoInfo(l.slot),
       call: k && k.callT > 0 ? { from: nameOf(k.callFrom) } : null, cop: !!(k && k.copT > 0), drunk: !!(k && k.drunkT > 0),
       hand: handInfo(l.slot), others: W.players.filter(p => p.slot !== l.slot).map(p => ({ slot: p.slot, name: p.name, color: p.color, place: placeOf(p.slot) })),
@@ -481,6 +495,7 @@ function switchTrack(id) {
 
 function startRace() {
   if (!W.players.length) return;
+  prepMode();
   const order = [...W.players].sort(() => Math.random() - 0.5);
   W.grid = order.map((p, i) => ({ slot: p.slot, gi: i }));
   W.raceId = Date.now() % 1e9;
@@ -488,11 +503,13 @@ function startRace() {
   W.portals = track.portalFractions.map(() => 0); W.hazards = []; W.missiles = []; W.feed = []; W.cfx = [];
   W.pit = null; W.lampo = null; W.pitsDone = 0; W.pitUsed = []; mgStates.clear(); botMg.clear(); appliedPrizes.clear();
   firstFinishAt = -1; finishT = 0;
+  lapTimes.clear(); W.rec = null;
+  if (W.mode === 'tempo') W.portals = W.portals.map(() => 1e9);   // contro il tempo: niente carte
   for (const l of locals.values()) if (l.brain) l.brain = newBrain(cpuLevel);
   buildKarts();
   setPause(false);
   // prima della gara: un minigioco a caso decide la griglia di partenza (con almeno 2 piloti)
-  if (W.players.length >= 2 && params.get('grid') !== '0') { startPit(true); return; }
+  if (W.players.length >= 2 && params.get('grid') !== '0' && W.mode !== 'tempo') { startPit(true); return; }
   onPhaseChange();
   pushStatus(true);
 }
@@ -522,6 +539,7 @@ function buildKarts() {
 function toLobby() {
   W.pit = null; W.lampo = null;
   W.phase = 'lobby'; karts.clear(); remoteBuf.clear(); W.grid = [];
+  W.gp = null; W.rec = null; lobbySig = '';
   setPause(false);
   W.players = W.players.filter(p => p.connected);
   updateCaptain(); onPhaseChange(); pushStatus(true);
@@ -542,6 +560,7 @@ function finishRace() {
     const p = regBySlot(k.slot) || k;
     return { slot: k.slot, name: p.name, color: p.color, place: k.place, time: k.finished ? k.finishTime : null };
   });
+  modeResults();
   onPhaseChange(); pushStatus(true);
 }
 
@@ -705,6 +724,7 @@ function simStep() {
     }
     if (MASTER) {
       updatePlaces();
+      lapHook();
       lampoMaster();
       if (W.phase === 'race' && !W.lampo) checkPit();
       const all = [...karts.values()];
@@ -751,6 +771,7 @@ function worldMsg() {
   W.q++;
   return {
     portals: W.portals, hazards: W.hazards, missiles: W.missiles, feed: W.feed, cfx: W.cfx, night: W.night, pit: W.pit, pitsDone: W.pitsDone, lampo: W.lampo, trackId: W.trackId,
+    mode: W.mode, gp: W.gp, rec: W.rec,
     t: 'w', q: W.q, raceId: W.raceId, phase: W.phase, laps: W.laps, raceTime: W.raceTime, countdown: W.countdown,
     introT: W.introT, paused: W.paused, pauseMsg: W.pauseMsg, captain: W.captain, grid: W.grid, results: W.results,
     players: W.players.map(p => ({ slot: p.slot, cid: p.cid, name: p.name, color: p.color, station: p.station, connected: p.connected, kbd: p.kbd, cpu: p.cpu })),
@@ -943,6 +964,7 @@ function onMasterCmd(msg, sid) {
   const owns = (slot) => stationOf(slot) === sid;
   switch (msg.t) {
     case 'portal': {
+      if (W.mode === 'tempo') return;
       if (!owns(msg.slot) || W.phase !== 'race') return;
       const i = msg.pi;
       if (!(i >= 0 && i < W.portals.length) || W.portals[i] > W.raceTime) return;
@@ -1171,7 +1193,7 @@ function onPhaseChange() {
 let lobbySig = '';
 let cpuLevel = CPU_LEVELS[store.get('cpu-level', 'normale')] ? store.get('cpu-level', 'normale') : 'normale';
 function drawLobby() {
-  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel, W.mgShort, W.mgType, W.quizCats, track.id, W.night, photoVer]);
+  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel, W.mgShort, W.mgType, W.quizCats, track.id, W.night, photoVer, W.mode]);
   if (sig === lobbySig) return;
   lobbySig = sig;
   const el = $('players');
@@ -1248,6 +1270,7 @@ function drawLobby() {
       ns.appendChild(b);
     }
   }
+  drawModeSel();
   $('cpu-add').disabled = W.players.length >= MAX_PLAYERS;
   $('cpu-add').textContent = W.players.length >= MAX_PLAYERS ? 'Stanza piena' : '+ Aggiungi computer';
   const lv = $('cpu-level');
@@ -1270,8 +1293,10 @@ function fmt(t) {
 function drawPodium() {
   const st = $('stands');
   st.innerHTML = '';
+  // a fine Gran Premio / Torneo sul podio salgono i primi della classifica generale
+  const podList = W.gp && W.gp.final && W.gp.table ? W.gp.table : W.results;
   for (const place of [2, 1, 3]) {
-    const r = W.results.find(x => x.place === place);
+    const r = podList.find(x => x.place === place);
     if (!r) continue;
     const d = document.createElement('div');
     d.className = `stand p${place}`;
@@ -1285,13 +1310,14 @@ function drawPodium() {
   tb.innerHTML = '';
   for (const r of W.results) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td style="width:60px">${r.place}°</td><td><span class="sw"></span><span class="n"></span></td><td class="r">${r.time == null ? 'non arrivato' : fmt(r.time)}</td>`;
+    tr.innerHTML = `<td style="width:60px">${r.place}°</td><td><span class="sw"></span><span class="n"></span></td>` + resultExtra(r) + `<td class="r">${r.time == null ? 'non arrivato' : fmt(r.time)}</td>`;
     tr.querySelector('.sw').style.background = r.color;
     tr.querySelector('.n').textContent = r.name;
     tb.appendChild(tr);
   }
   $('again').classList.toggle('hidden', !MASTER);
   $('tolobby').classList.toggle('hidden', !MASTER);
+  drawModePodium();
 }
 
 // pulsanti
@@ -1466,12 +1492,14 @@ const isBot = (l) => !!(l.brain || l.cid.startsWith('kbd'));
 
 // distanza di gara (in metri) del prossimo pit stop, o null se non ce ne sono più
 function nextPitAt() {
+  if (W.mode === 'tempo') return null;
   const laps = pitLaps(W.laps);
   if (W.pitsDone >= laps.length || !['race', 'countdown'].includes(W.phase)) return null;
   return (laps[W.pitsDone] - 1 + track.pitFraction) * track.length;
 }
 
 function checkPit() {
+  if (W.mode === 'tempo') return;
   const laps = pitLaps(W.laps);
   if (W.pitsDone >= laps.length) return;
   const at = (laps[W.pitsDone] - 1 + track.pitFraction) * track.length;
@@ -1791,6 +1819,7 @@ function endPlay() {
 function finishRanking(ranking) {
   const P = W.pit;
   P.results = ranking.map(r => ({ ...r, prize: P.grid ? { text: `Parti ${r.place}°` } : prizeFor(r.place, ranking.length) }));
+  if (W.mode === 'torneo') tournamentMg(P.results);
   P.stage = 'results'; P.stageT = 0;
   pushStatus(true);
 }
@@ -1875,6 +1904,239 @@ function replaySnap(now) {
   return { slot: win, snap: { phase: 'replay', laps: W.laps, raceTime: 0, countdown: 0, introT: 0, paused: false, karts, portals: W.portals.map(() => true), hazards: a.hazards || [], missiles: a.missiles || [], feed: [], notes: [] } };
 }
 
+// ------------------------------------------------------------------ modalità di gioco
+// Gran Premio / Torneo: serie di gare a punti. Contro il tempo: niente carte né pit stop, tempi sul giro e record.
+// Classifica storica: sempre attiva, salvata su questo PC (solo PC principale).
+const lapTimes = new Map();       // (PC principale) slot -> { max, t0, laps: [] } tempi sul giro della gara in corso
+let gpNextAt = 0;                 // (PC principale) quando parte da sola la prossima gara della serie
+let storiaArm = 0;                // "Azzera" va toccato due volte
+const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// prima di ogni gara: nuova serie o gara successiva (e, se ci sono più piste, si gira)
+function prepMode() {
+  const M = MODES[W.mode];
+  gpNextAt = 0;
+  if (!M || !M.races) { W.gp = null; return; }
+  if (W.phase === 'lobby' || !W.gp || W.gp.final || W.gp.mode !== W.mode) {
+    W.gp = { mode: W.mode, race: 1, of: M.races, sc: {}, table: [], final: false, champion: null, firstTrack: track.id };
+  } else W.gp.race++;
+  if (TRACK_IDS.length > 1) {
+    const i0 = Math.max(0, TRACK_IDS.indexOf(W.gp.firstTrack));
+    const id = TRACK_IDS[(i0 + W.gp.race - 1) % TRACK_IDS.length];
+    if (id !== track.id) switchTrack(id);
+  }
+}
+
+// (PC principale, ogni passo di gara) quando un kart passa il traguardo segno il tempo del giro
+function lapHook() {
+  for (const k of karts.values()) {
+    let L = lapTimes.get(k.slot);
+    if (!L) { L = { max: k.lapCount, t0: 0, laps: [] }; lapTimes.set(k.slot, L); }
+    if (k.lapCount > L.max) {
+      if (L.max >= 1 && L.laps.length < W.laps) L.laps.push(W.raceTime - L.t0);
+      L.t0 = W.raceTime; L.max = k.lapCount;
+    }
+  }
+}
+
+const scKey = (slot, name) => slot + ':' + name;
+function gpEntry(slot) {
+  const p = regBySlot(slot) || {};
+  const r = W.results.find(x => x.slot === slot) || {};
+  const name = p.name || r.name || 'Pilota';
+  const key = scKey(slot, name);
+  if (!W.gp.sc[key]) W.gp.sc[key] = { slot, name, color: p.color || r.color || '#888888', cpu: !!p.cpu, pts: 0, race: 0, mg: 0, wins: 0, last: 9 };
+  return W.gp.sc[key];
+}
+function gpTable() {
+  const list = Object.values(W.gp.sc).sort((a, b) => (b.pts - a.pts) || (b.wins - a.wins) || (a.last - b.last));
+  W.gp.table = list.map((e, i) => ({ ...e, place: i + 1 }));
+}
+
+// (Torneo) punti dei minigiochi: 3, 2, 1
+function tournamentMg(results) {
+  if (!W.gp || W.mode !== 'torneo' || !Array.isArray(results)) return;
+  for (const r of results) {
+    const p = MG_PTS[r.place - 1] || 0;
+    if (!p) continue;
+    const e = gpEntry(r.slot);
+    e.mg += p; e.pts += p;
+  }
+}
+
+// (PC principale) a fine gara: tempi sul giro, punti della serie, record, classifica storica
+function modeResults() {
+  for (const r of W.results) {
+    const L = lapTimes.get(r.slot);
+    r.laps = L ? L.laps.map(r2) : [];
+    r.best = r.laps.length ? Math.min(...r.laps) : null;
+  }
+  if (W.mode === 'tempo') checkRecords();
+  if (W.gp) {
+    for (const r of W.results) {
+      const e = gpEntry(r.slot);
+      const p = PTS[r.place - 1] || 0;
+      r.pts = p; e.pts += p; e.race += p; e.last = r.place; e.color = r.color;
+      if (r.place === 1) e.wins++;
+    }
+    gpTable();
+    W.gp.final = W.gp.race >= W.gp.of;
+    W.gp.champion = W.gp.final && W.gp.table[0] ? W.gp.table[0].name : null;
+    gpNextAt = W.gp.final ? 0 : performance.now() + GP_NEXT_MS;
+  }
+  saveStoria();
+}
+
+function checkRecords() {
+  const all = store.get('records', {}) || {};
+  const R = all[track.id] || (all[track.id] = { lap: null, total: {} });
+  if (!R.total) R.total = {};
+  W.rec = { lap: null, total: null, prevLap: R.lap, prevTotal: R.total[W.laps] || null, laps: W.laps };
+  const bl = W.results.filter(r => r.best != null).sort((a, b) => a.best - b.best)[0];
+  if (bl && (!R.lap || bl.best < R.lap.t)) { R.lap = { t: bl.best, name: bl.name }; W.rec.lap = R.lap; }
+  const bt = W.results.filter(r => r.time != null).sort((a, b) => a.time - b.time)[0];
+  if (bt && (!R.total[W.laps] || bt.time < R.total[W.laps].t)) { R.total[W.laps] = { t: r2(bt.time), name: bt.name }; W.rec.total = R.total[W.laps]; }
+  store.set('records', all);
+}
+
+function saveStoria() {
+  if (!MASTER) return;
+  const S = store.get('storia', {}) || {};
+  const row = (n) => (S[n] = S[n] || { races: 0, wins: 0, pod: 0, pts: 0, titles: 0 });
+  for (const r of W.results) {
+    const p = regBySlot(r.slot);
+    if (!p || p.cpu) continue;           // i computer non contano
+    const e = row(r.name);
+    e.races++; e.pts += PTS[r.place - 1] || 0;
+    if (r.place === 1) e.wins++;
+    if (r.place <= 3) e.pod++;
+  }
+  if (W.gp && W.gp.final && W.gp.table[0] && !W.gp.table[0].cpu) row(W.gp.table[0].name).titles++;
+  store.set('storia', S);
+}
+
+// colonna in più nella tabella dei risultati
+function resultExtra(r) {
+  if (W.gp) return `<td class="r pts">+${r.pts || 0}</td>`;
+  if (W.mode === 'tempo') return `<td class="r best">giro ${r.best == null ? '—' : fmt(r.best)}</td>`;
+  return '';
+}
+
+function recordText(trackId, laps) {
+  const all = store.get('records', {}) || {};
+  const R = all[trackId];
+  const parts = [];
+  if (R && R.lap) parts.push(`giro ${fmt(R.lap.t)} (${R.lap.name})`);
+  if (R && R.total && R.total[laps]) parts.push(`${laps} ${laps === 1 ? 'giro' : 'giri'} ${fmt(R.total[laps].t)} (${R.total[laps].name})`);
+  return parts.join(' · ');
+}
+
+// selettore MODALITÀ nella sala d'attesa
+function drawModeSel() {
+  const ms = $('mode-sel');
+  if (!ms) return;
+  ms.innerHTML = '';
+  for (const [id, M] of Object.entries(MODES)) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = M.short; b.className = W.mode === id ? 'on' : '';
+    b.disabled = !MASTER;
+    b.onclick = () => { if (MASTER && W.phase === 'lobby') { W.mode = id; store.set('mode', id); lobbySig = ''; drawLobby(); pushStatus(true); } };
+    ms.appendChild(b);
+  }
+  const info = $('mode-info');
+  const tname = (TRACK_LIST.find(t => t.id === track.id) || {}).name || track.id;
+  let txt = 'Una gara con carte e minigiochi ai pit stop.';
+  if (W.mode === 'gp') txt = `4 gare di fila${TRACK_IDS.length > 1 ? ' (si cambia pista)' : ''}. Punti: 10, 7, 5, 3, 2, 1. Chi ne fa di più è campione.`;
+  else if (W.mode === 'torneo') txt = '3 gare a punti (10, 7, 5, 3…) e anche i minigiochi danno punti: 3, 2, 1.';
+  else if (W.mode === 'tempo') {
+    const rec = MASTER ? recordText(track.id, W.laps) : '';
+    txt = `Niente carte né pit stop: conta solo il tempo. ${rec ? `Record ${tname}: ${rec}` : `Ancora nessun record su ${tname}.`}`;
+  }
+  info.textContent = txt;
+  info.classList.toggle('rec', W.mode === 'tempo');
+  $('storia-open').classList.toggle('hidden', !MASTER);
+}
+
+// parte in più del podio: serie a punti, campione, record
+function drawModePodium() {
+  const G = W.gp;
+  const panel = $('podium').querySelector('.panel');
+  const head = $('mode-head'), box = $('gp-box'), next = $('gp-next');
+  panel.classList.toggle('gp', !!G);
+  head.innerHTML = ''; box.innerHTML = ''; next.textContent = '';
+  head.classList.toggle('hidden', W.mode === 'singola' && !G);
+  box.classList.toggle('hidden', !G);
+  $('podium-title').textContent = 'CLASSIFICA';
+  $('again').textContent = 'RIVINCITA';
+  if (G) {
+    const label = G.mode === 'torneo' ? 'Torneo Mancave' : 'Gran Premio';
+    head.innerHTML = `<div class="mode-tag">${label} · Gara ${G.race} di ${G.of}</div>`;
+    if (G.final) {
+      head.innerHTML += `<div class="champ"><small>CAMPIONE ${G.mode === 'torneo' ? 'DEL TORNEO MANCAVE' : 'DEL GRAN PREMIO'}:</small><b>${esc(G.champion || '—')}</b></div>`;
+      $('podium-title').textContent = 'CLASSIFICA FINALE';
+      $('again').textContent = G.mode === 'torneo' ? 'NUOVO TORNEO' : 'NUOVO GRAN PREMIO';
+    } else {
+      $('again').textContent = 'PROSSIMA GARA';
+      next.textContent = MASTER ? '' : 'La prossima gara parte a breve…';
+    }
+    const rows = (G.table || []).map(e => {
+      const r = W.results.find(x => x.slot === e.slot && x.name === e.name);
+      const sub = G.mode === 'torneo' ? `<small>gare ${e.race} · minigiochi ${e.mg}</small>` : (e.wins ? `<small>${e.wins} ${e.wins === 1 ? 'vittoria' : 'vittorie'}</small>` : '');
+      return `<tr class="${e.place === 1 ? 'lead' : ''}"><td class="gp-pl">${e.place}°</td><td><span class="sw" style="background:${esc(e.color)}"></span><span class="n">${esc(e.name)}</span>${sub}</td>` +
+        `<td class="r gp-plus">${r && r.pts ? '+' + r.pts : ''}</td><td class="r gp-pts">${e.pts}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div class="label">Classifica ${label}</div><table class="gp-table">${rows}</table>`;
+  } else if (W.mode === 'tempo') {
+    head.innerHTML = '<div class="mode-tag">Contro il tempo</div>';
+    const R = W.rec;
+    if (R && (R.lap || R.total)) {
+      const lines = [];
+      if (R.total) lines.push(`${R.laps} ${R.laps === 1 ? 'giro' : 'giri'}: ${fmt(R.total.t)} · ${esc(R.total.name)}`);
+      if (R.lap) lines.push(`Giro migliore: ${fmt(R.lap.t)} · ${esc(R.lap.name)}`);
+      head.innerHTML += `<div class="champ rec"><b>NUOVO RECORD!</b><small>${lines.join('<br>')}</small></div>`;
+    } else if (R && (R.prevLap || R.prevTotal)) {
+      const lines = [];
+      if (R.prevTotal) lines.push(`${R.laps} ${R.laps === 1 ? 'giro' : 'giri'} ${fmt(R.prevTotal.t)} (${esc(R.prevTotal.name)})`);
+      if (R.prevLap) lines.push(`giro ${fmt(R.prevLap.t)} (${esc(R.prevLap.name)})`);
+      head.innerHTML += `<div class="rec-now">Record da battere: ${lines.join(' · ')}</div>`;
+    }
+  }
+  modeTick();
+}
+
+// (PC principale) la gara successiva della serie parte da sola
+function modeTick() {
+  if (!MASTER || W.phase !== 'podium' || !W.gp || W.gp.final || !gpNextAt) return;
+  const left = Math.ceil((gpNextAt - performance.now()) / 1000);
+  $('gp-next').textContent = left > 0 ? `Prossima gara tra ${left} s` : 'Si parte!';
+  if (left <= 0) { gpNextAt = 0; startRace(); }
+}
+setInterval(modeTick, 250);
+
+// classifica storica (pannello)
+function drawStoria() {
+  const S = store.get('storia', {}) || {};
+  const list = Object.entries(S).map(([name, e]) => ({ name, ...e })).sort((a, b) => (b.wins - a.wins) || (b.pts - a.pts) || (b.titles - a.titles));
+  const tb = $('storia-table');
+  tb.innerHTML = list.length
+    ? '<tr class="hd"><td></td><td>Pilota</td><td class="r">Gare</td><td class="r">Vittorie</td><td class="r">Podi</td><td class="r">Punti</td><td class="r">Titoli</td></tr>' +
+      list.map((e, i) => `<tr><td>${i + 1}°</td><td class="n">${esc(e.name)}</td><td class="r">${e.races}</td><td class="r"><b>${e.wins}</b></td><td class="r">${e.pod}</td><td class="r">${e.pts}</td><td class="r">${e.titles ? '🏆 ' + e.titles : '0'}</td></tr>`).join('')
+    : '<tr><td class="mq-empty">Ancora nessuna gara giocata: la prima vittoria finisce qui.</td></tr>';
+  const rb = $('storia-reset');
+  storiaArm = 0; rb.textContent = 'Azzera'; rb.classList.remove('armed');
+  rb.disabled = !list.length;
+}
+$('storia-open').onclick = () => { $('storia').classList.remove('hidden'); drawStoria(); };
+$('storia-close').onclick = () => $('storia').classList.add('hidden');
+$('storia-reset').onclick = () => {
+  const rb = $('storia-reset');
+  // si azzera solo col secondo tocco, entro pochi secondi
+  if (storiaArm && performance.now() < storiaArm) { store.set('storia', {}); drawStoria(); toast('Classifica storica azzerata'); return; }
+  storiaArm = performance.now() + 6000;
+  rb.textContent = 'Sicuro? Tocca ancora'; rb.classList.add('armed');
+  setTimeout(() => { if (storiaArm && performance.now() >= storiaArm) { storiaArm = 0; rb.textContent = 'Azzera'; rb.classList.remove('armed'); } }, 6100);
+};
+
 // solo per i test: avanzare a scatti (per registrare i video fotogramma per fotogramma)
 function advance(frames = 1, fps = 30, drawAll = true) {
   // l'orologio finto vale solo mentre avanzo
@@ -1893,7 +2155,7 @@ function advanceInner(frames, fps, drawAll) {
 }
 
 // solo per i test (pc.html?debug=1)
-if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, get track() { return track; }, mgStates, startPit, view, advance, switchTrack };
+if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, get track() { return track; }, mgStates, startPit, view, advance, switchTrack, startRace, finishRace, toLobby, modeTick };
 
 drawLobby();
 startNet();

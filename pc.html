@@ -40,6 +40,11 @@
     <div>
       <div class="label" style="margin-bottom:10px">Piloti</div>
       <div class="players" id="players"></div>
+      <div class="mode-row">
+        <div><span class="label">Modalità</span><div class="seg" id="mode-sel"></div></div>
+        <button class="btn ghost" id="storia-open" type="button">🏆 Classifica storica</button>
+      </div>
+      <p class="hint mode-info" id="mode-info"></p>
       <div class="settings">
         <div><span class="label">Pista</span><div class="seg" id="track-sel"></div></div>
         <div><span class="label">Ora</span><div class="seg" id="night-sel"></div></div>
@@ -86,9 +91,16 @@
 
 <div id="podium" class="overlay hidden">
   <div class="panel">
-    <h2>CLASSIFICA</h2>
-    <div class="stands" id="stands"></div>
-    <table class="results" id="results"></table>
+    <div class="mode-head hidden" id="mode-head"></div>
+    <h2 id="podium-title">CLASSIFICA</h2>
+    <div class="podium-cols">
+      <div class="podium-race">
+        <div class="stands" id="stands"></div>
+        <table class="results" id="results"></table>
+      </div>
+      <div class="gp-box hidden" id="gp-box"></div>
+    </div>
+    <p class="gp-next" id="gp-next"></p>
     <div class="center-actions">
       <button class="btn primary" id="again" type="button">RIVINCITA</button>
       <button class="btn ghost" id="tolobby" type="button">Torna alla lobby</button>
@@ -110,6 +122,14 @@
       <button class="btn primary" type="submit">AGGIUNGI</button>
     </form>
     <div class="mq-list" id="mq-list"></div>
+  </div>
+</div>
+<div id="storia" class="overlay hidden">
+  <div class="panel storia-panel">
+    <div class="mq-head"><h2 class="display">Classifica storica</h2><button class="btn ghost" id="storia-close" type="button">Chiudi</button></div>
+    <p class="hint">Tutte le gare giocate su questo PC, in ogni modalità (i computer non contano). In ordine di vittorie, poi di punti.</p>
+    <table class="results storia-table" id="storia-table"></table>
+    <div class="center-actions"><button class="btn ghost storia-reset" id="storia-reset" type="button">Azzera</button></div>
   </div>
 </div>
 <div id="lost" class="overlay hidden"><div class="panel" style="text-align:center"><h2 class="display" style="color:#ffd400;margin:0 0 8px">Collegamento perso</h2><p class="hint">Mi ricollego alla stanza…</p></div></div>

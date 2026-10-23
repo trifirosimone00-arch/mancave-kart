@@ -273,6 +273,7 @@ function onStatus(s) {
   $('wait-pilots').classList.toggle('hidden', s.phase !== 'lobby');
   $('wait-title').textContent = `Sei dentro, ${st.name}!`;
   $('captain').classList.toggle('hidden', !s.captain);
+  $('wait-mode').textContent = s.mode ? 'Modalità: ' + ({ singola: 'Gara singola', gp: 'Gran Premio', tempo: 'Contro il tempo', torneo: 'Torneo Mancave' }[s.mode] || s.mode) + (s.gp ? ` (gara ${s.gp.race} di ${s.gp.of})` : '') : '';
   $('wait-text').textContent = s.captain ? 'Sei il capo stanza: quando ci siete tutti, avvia la gara.' : 'Aspetta che il capo stanza faccia partire la gara.';
   const lapsEl = $('laps');
   if (lapsEl.dataset.v !== String(s.laps)) {

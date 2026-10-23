@@ -477,7 +477,7 @@ export function kgLabel(ka, slot) {
   const v = Math.floor(ka.sc[slot] || 0);
   switch (ka.g) {
     case 'patata': case 'aspirapolvere': case 'pavimento': return ka.out[slot] != null ? 'Fuori' : (ka.g === 'patata' && ka.bomb === slot ? '💣 ha la bomba!' : 'In gioco');
-    case 'battaglia': return ka.out[slot] != null ? 'Fuori' : `${'🎈'.repeat(Math.max(0, ka.bal[slot] || 0))} · ${v} colpi`;
+    case 'battaglia': return ka.out[slot] != null ? 'Fuori' : `${'🎈'.repeat(Math.max(0, ka.bal[slot] || 0))} · ${v === 1 ? '1 colpo' : v + ' colpi'}`;
     case 'calcetto': return `${ka.team[slot] ? 'Blu' : 'Arancio'} ${ka.tg[ka.team[slot]]}-${ka.tg[1 - ka.team[slot]]}${v ? ` ⚽${v}` : ''}`;
     case 'collina': return `${v} pt${ka.king === slot ? ' 👑' : ''}`;
     case 'slalom': return v === 1 ? '1 porta' : `${v} porte`;

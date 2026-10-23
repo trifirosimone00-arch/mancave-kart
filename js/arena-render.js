@@ -265,7 +265,7 @@ export function createArenaView(scene, cfx) {
       for (const p of players) {
         const g = new THREE.Group();
         for (let i = 0; i < 3; i++) {
-          const b = new THREE.Mesh(new THREE.SphereGeometry(0.9, 14, 12), std(p.color, { roughness: 0.2, metalness: 0.1 })); b.scale.y = 1.2;
+          const b = new THREE.Mesh(new THREE.SphereGeometry(1.3, 14, 12), std(p.color, { roughness: 0.2, metalness: 0.1 })); b.scale.y = 1.2;
           b.position.set((i - 1) * 1.3, 6 + (i % 2) * 0.6, -1.2); g.add(b);
         }
         deco.add(g); extra.balloons[p.slot] = g;

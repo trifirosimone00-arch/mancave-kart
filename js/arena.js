@@ -205,9 +205,9 @@ export function kgStep(ka, ks, dt) {
     for (const a of alive) for (const b of alive) {
       if (a === b) continue;
       const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
-      if (d > 4.2 || d < 0.01) continue;
+      if (d > 4.8 || d < 0.01) continue;
       const f = fwd(a);
-      if (a.speed > 9 && (f.x * dx + f.z * dz) / d > 0.55 && !stunned(a.slot)) {
+      if (a.speed > 7 && (f.x * dx + f.z * dz) / d > 0.45 && !stunned(a.slot)) {
         const key = a.slot + '>' + b.slot;
         if ((ka.cd[key] || 0) > ka.t || (ka.cd['inv' + b.slot] || 0) > ka.t) continue;
         ka.cd['inv' + b.slot] = ka.t + 1.6;          // chi viene colpito è intoccabile per un attimo
@@ -519,7 +519,17 @@ export function kgCpu(ka, k, others, brain) {
     case 'slalom': { const G = slalomGates(); tg = G[(ka.gate[k.slot] || 0) % G.length]; break; }
     case 'bowling': { const p = nearest(ka.items.filter(o => o.k === 'pin' && o.up)); if (p) tg = p; else tg = { x: OX, z: OZ - 25 }; break; }
     case 'collina': tg = { x: ka.hill.x + Math.sin(k.slot * 2) * 3, z: ka.hill.z + Math.cos(k.slot * 2) * 3 }; break;
-    case 'autoscontro': case 'battaglia': { const o = nearest(alive); if (o) tg = { x: o.x + Math.sin(o.yaw) * o.speed * 0.3, z: o.z + Math.cos(o.yaw) * o.speed * 0.3 }; break; }
+    case 'autoscontro': case 'battaglia': {
+      // dopo un contatto mi allontano per prendere la rincorsa, poi punto il più vicino
+      if (brain.awayT > 0) { brain.awayT -= 1 / 60; tg = brain.away; break; }
+      const o = nearest(alive);
+      if (o) {
+        tg = { x: o.x + Math.sin(o.yaw) * o.speed * 0.3, z: o.z + Math.cos(o.yaw) * o.speed * 0.3 };
+        if (d2(k, o) < 5.5) brain.close = (brain.close || 0) + 1 / 60; else brain.close = 0;
+        if (brain.close > 0.5) { brain.close = 0; brain.awayT = 1.3; brain.away = clampIn({ x: OX + (Math.random() * 2 - 1) * (HW - 8), z: OZ + (Math.random() * 2 - 1) * (HD - 8) }, 8); }
+      }
+      break;
+    }
     case 'patata': {
       if (ka.bomb === k.slot) { const o = nearest(alive); if (o) tg = o; }
       else { const h = others.find(o => o.slot === ka.bomb); if (h) flee = h; }

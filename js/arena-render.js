@@ -276,7 +276,7 @@ export function createArenaView(scene, cfx) {
 
   function makeItem(o) {
     switch (o.k) {
-      case 'pin': return makePin();
+      case 'pin': { const m = makePin(); m.children.forEach(c => c.scale.setScalar(1.5)); m.children.forEach(c => c.position.y *= 1.5); return m; }
       case 'ball': { const m = new THREE.Mesh(new THREE.SphereGeometry(o.r, 24, 18), std('#fff', { map: soccer, roughness: 0.4 })); m.castShadow = true; return m; }
       case 'pball': { const m = new THREE.Mesh(new THREE.SphereGeometry(o.r, 20, 16), std(o.c || '#fff', { roughness: 0.12, metalness: 0.1 })); m.castShadow = true; return m; }
       case 'beer': return makeBeer();

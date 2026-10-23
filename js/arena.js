@@ -103,7 +103,7 @@ function rackPins(ka, add) {
   ka.items = ka.items.filter(o => o.k !== 'pin');
   let n = 0;
   for (let row = 0; row < 4; row++) for (let i = 0; i <= row; i++) {
-    add({ k: 'pin', x: OX + (i - row / 2) * 3.4, z: OZ + 4 - row * 3, vx: 0, vz: 0, r: 0.9, up: 1, by: -1, n: n++ });
+    add({ k: 'pin', x: OX + (i - row / 2) * 3.8, z: OZ + 5 - row * 3.4, vx: 0, vz: 0, r: 1.15, up: 1, by: -1, n: n++ });
   }
   ka.downT = -1;
 }

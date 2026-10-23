@@ -1642,7 +1642,7 @@ function arenaLocalStep() {
       const out = ka.out[k.slot] != null;
       stepArenaKart(k, input || {}, DT, {
         out, fall: out && P.game === 'pavimento', stun: (ka.stun[k.slot] || 0) > ka.t,
-        solids: arenaSolids(ka), speedMul: ka.flag && ka.flag.by === k.slot ? 0.88 : 1,
+        solids: arenaSolids(ka), speedMul: P.game === 'pavimento' ? 0.68 : ka.flag && ka.flag.by === k.slot ? 0.88 : 1,
       });
       if (out && P.game === 'aspirapolvere') { k.y = Math.max(-6, (k.y || 0) - DT * 8); }
       if (!out) mine.push(k);

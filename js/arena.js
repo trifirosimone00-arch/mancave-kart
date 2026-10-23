@@ -331,21 +331,24 @@ export function kgStep(ka, ks, dt) {
       break;
     }
     case 'pavimento': {
+      // piastrelle: 0 intera, 1 crepata, 2 sta crollando (da tf), -1 crollata
+      ka.tf = ka.tf || {};
+      const hurt = (ti) => { if (ka.tl[ti] === 0) ka.tl[ti] = 1; else if (ka.tl[ti] === 1) { ka.tl[ti] = 2; ka.tf[ti] = ka.t; } };
       for (const k of alive) {
         const i = Math.floor((k.x - (OX - HW)) / TILE), j = Math.floor((k.z - (OZ - HD)) / TILE);
         if (i < 0 || j < 0 || i >= TNX || j >= TNZ) continue;
-        const ti = j * TNX + i, v = ka.tl[ti];
+        const ti = j * TNX + i;
         ka.on = ka.on || {}; ka.onT = ka.onT || {};
-        // la piastrella si crepa quando la lasci (o se ci resti fermo più di 2,5 secondi)
+        // la piastrella si crepa quando la lasci; se ci ripassi sopra crolla (e anche se ci resti fermo troppo)
         const prev = ka.on[k.slot];
-        if (prev != null && prev !== ti && ka.tl[prev] === 0) ka.tl[prev] = Math.max(0.01, Math.round(ka.t * 100) / 100);
+        if (prev != null && prev !== ti) hurt(prev);
         if (prev !== ti) { ka.on[k.slot] = ti; ka.onT[k.slot] = ka.t; }
-        else if (v === 0 && ka.t - ka.onT[k.slot] > 2.5) ka.tl[ti] = ka.t;
-        if (v < 0) { ka.out[k.slot] = ka.t; fx('fall', k.x, k.z, k.slot); }
+        else if (ka.t - ka.onT[k.slot] > 2.5) { hurt(ti); ka.onT[k.slot] = ka.t; }
+        if (ka.tl[ti] < 0) { ka.out[k.slot] = ka.t; fx('fall', k.x, k.z, k.slot); }
       }
-      // dopo 25 secondi crollano anche piastrelle a caso, così finisce
-      if (ka.t > 20 && rr(ka) < dt * (0.8 + (ka.t - 20) * 0.08)) { const ti = Math.floor(rr(ka) * ka.tl.length); if (ka.tl[ti] === 0) ka.tl[ti] = ka.t; }
-      for (let i = 0; i < ka.tl.length; i++) if (ka.tl[i] > 0 && ka.t - ka.tl[i] > 2) ka.tl[i] = -1;
+      // dopo 20 secondi crollano anche piastrelle a caso, così finisce
+      if (ka.t > 20 && rr(ka) < dt * (0.8 + (ka.t - 20) * 0.1)) { const ti = Math.floor(rr(ka) * ka.tl.length); if (ka.tl[ti] >= 0 && ka.tl[ti] < 2) { ka.tl[ti] = 2; ka.tf[ti] = ka.t; } }
+      for (let i = 0; i < ka.tl.length; i++) if (ka.tl[i] === 2 && ka.t - ka.tf[i] > 1.6) ka.tl[i] = -1;
       if (alive.length <= 1 && ks.length > 1) ka.over = true;
       break;
     }
@@ -555,15 +558,22 @@ export function kgCpu(ka, k, others, brain) {
     }
     case 'aspirapolvere': flee = ka.vac; break;
     case 'pavimento': {
+      // la piastrella sotto di me sta crollando: scappo sulla più vicina intera, a tutta velocità
+      if (tileState(ka, k.x, k.z) === 2) {
+        let best = null, bd = Infinity;
+        for (let j = 0; j < TNZ; j++) for (let i = 0; i < TNX; i++) if (ka.tl[j * TNX + i] === 0) { const p = { x: OX - HW + (i + 0.5) * TILE, z: OZ - HD + (j + 0.5) * TILE }; const d = d2(k, p); if (d > 4 && d < bd) { bd = d; best = p; } }
+        if (best) { brain.pt = best; brain.next = brain.t + 0.6; brain.danger = 0; }
+      }
       // buco o crepa davanti: cambio strada subito
-      for (const dd of [4, 8]) { const ax = k.x + Math.sin(k.yaw) * dd, az = k.z + Math.cos(k.yaw) * dd; if (tileState(ka, ax, az) !== 0) { brain.next = 0; break; } }
+      for (const dd of [3.5, 7]) { const ax = k.x + Math.sin(k.yaw) * dd, az = k.z + Math.cos(k.yaw) * dd; const ts = tileState(ka, ax, az); if (ts < 0 || ts === 2) { brain.next = 0; brain.danger = 0.35; if (dd < 4 && ts < 0) brain.backT = 0.5; break; } }
+      if (brain.backT > 0) { brain.backT -= 1 / 60; return { steer: 0, drift: false, brake: true }; }
       if (!brain.pt || brain.t > brain.next || tileState(ka, brain.pt.x, brain.pt.z) !== 0 || d2(k, brain.pt) < 6) {
         let best = null, bs = -Infinity;
         for (let n = 0; n < 40; n++) {
           const p = { x: OX + (Math.random() * 2 - 1) * (HW - 6), z: OZ + (Math.random() * 2 - 1) * (HD - 6) };
           if (tileState(ka, p.x, p.z) !== 0) continue;
           let sc = -Math.abs(d2(k, p) - 16);
-          for (let s = 1; s <= 6; s++) { const q = { x: k.x + (p.x - k.x) * s / 6, z: k.z + (p.z - k.z) * s / 6 }; const ts = tileState(ka, q.x, q.z); if (ts < 0) sc -= 40; else if (ts > 0) sc -= 12; }
+          for (let s = 1; s <= 6; s++) { const q = { x: k.x + (p.x - k.x) * s / 6, z: k.z + (p.z - k.z) * s / 6 }; const ts = tileState(ka, q.x, q.z); if (ts < 0 || ts === 2) sc -= 40; else if (ts === 1) sc -= 8; }
           if (sc > bs) { bs = sc; best = p; }
         }
         brain.pt = best || { x: OX, z: OZ }; brain.next = brain.t + 0.8;
@@ -606,6 +616,7 @@ export function kgCpu(ka, k, others, brain) {
   // se è dietro di me e vicino, faccio retromarcia sterzando
   const dist = d2(k, tg);
   if (Math.abs(d) > 2.4 && dist < 8 && !flee) return { steer: Math.sign(d) * 1, drift: false, brake: true };
+  if (brain.danger > 0) { brain.danger -= 1 / 60; if (k.speed > 9) brake = true; }
   // sterzo: d > 0 vuol dire che il bersaglio è a sinistra (yaw cresce a sinistra)
   const steer = Math.max(-1, Math.min(1, -d * 1.8));
   // incastrato contro il bordo: un po' di retromarcia
@@ -617,6 +628,5 @@ export function kgCpu(ka, k, others, brain) {
 export function tileState(ka, x, z) {
   const i = Math.floor((x - (OX - HW)) / TILE), j = Math.floor((z - (OZ - HD)) / TILE);
   if (i < 0 || j < 0 || i >= TNX || j >= TNZ) return -1;
-  const v = ka.tl[j * TNX + i];
-  return v < 0 ? -1 : v > 0 ? 1 : 0;
+  return ka.tl[j * TNX + i];
 }

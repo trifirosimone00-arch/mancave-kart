@@ -181,6 +181,12 @@ export function createArenaView(scene, cfx) {
   const extra = {};               // oggetti fissi del gioco
   const seenFx = new Set();
   const soccer = soccerTex();
+  // crepe disegnate sulle piastrelle colpite una volta
+  const crackTex = canvasTex(128, 128, (g, w, h) => {
+    g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#3a2410'; g.lineWidth = 5; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(20, 30); g.lineTo(55, 62); g.lineTo(48, 95); g.moveTo(55, 62); g.lineTo(100, 70); g.lineTo(115, 110); g.moveTo(80, 66); g.lineTo(90, 25); g.stroke();
+  });
 
   function buildDeco(game, ka, players) {
     root.remove(deco);
@@ -333,7 +339,8 @@ export function createArenaView(scene, cfx) {
     if (extra.tiles) extra.tiles.forEach((m, i) => {
       const v = ka.tl[i];
       if (v < 0) { m.position.y = Math.max(-60, m.position.y - dt * 40); m.visible = m.position.y > -55; }
-      else if (v > 0) { m.position.y = -0.55; m.material.color.set(Math.sin(tsec * 30) > 0 ? '#ff6b4a' : '#c94a2a'); m.position.x = OX - HW + ((i % TNX) + 0.5) * TILE + Math.sin(tsec * 60 + i) * 0.15; }
+      else if (v === 2) { m.position.y = -0.55; m.material.color.set(Math.sin(tsec * 30) > 0 ? '#ff6b4a' : '#c94a2a'); m.position.x = OX - HW + ((i % TNX) + 0.5) * TILE + Math.sin(tsec * 60 + i) * 0.15; }
+      else if (v === 1) { m.position.y = -0.55; m.visible = true; m.material.color.set('#d8b98a'); if (m.material.map !== crackTex) { m.material.map = crackTex; m.material.needsUpdate = true; } }
       else { m.position.y = -0.55; m.visible = true; }
     });
     if (extra.sofa) { extra.sofa.position.set(ka.sofa.x, 0, ka.sofa.z); extra.sofa.userData.ring.material.opacity = 0.6 + Math.sin(tsec * 6) * 0.3; }

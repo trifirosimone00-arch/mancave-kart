@@ -259,9 +259,11 @@ function onStatus(s) {
   const racing = ['intro', 'countdown', 'race', 'pit', 'finish'].includes(s.phase);
   if (s.phase === 'lobby' && st.view !== 'wait') show('wait');
   const lampoOn = !!(s.lampo && !s.lampo.done && s.phase === 'race');
-  if (racing && s.phase !== 'pit' && !lampoOn && st.view !== 'pad') show('pad');
-  if ((s.phase === 'pit' || lampoOn) && st.view !== 'mg') { closePick(); show('mg'); }
-  mg.update(s);
+  // minigioco col kart: si guida col volante anche durante il pit stop
+  const kartPlay = !!(s.phase === 'pit' && s.pit && s.pit.kart && (s.pit.stage === 'play' || s.pit.stage === 'count'));
+  if (racing && (s.phase !== 'pit' || kartPlay) && !lampoOn && st.view !== 'pad') { closePick(); show('pad'); }
+  if (((s.phase === 'pit' && !kartPlay) || lampoOn) && st.view !== 'mg') { closePick(); show('mg'); }
+  if (!kartPlay) mg.update(s);
   if (s.phase === 'podium' && st.view !== 'end') show('end');
 
   // attesa
@@ -284,10 +286,13 @@ function onStatus(s) {
     }
   }
   // volante
-  $('p-place').textContent = s.place ? s.place + '°' : '–';
-  $('p-lap').textContent = s.lap ? `Giro ${s.lap}/${s.laps}` : '';
+  $('p-place').textContent = kartPlay ? (s.pit.kt + 's') : s.place ? s.place + '°' : '–';
+  $('p-lap').textContent = kartPlay ? '' : s.lap ? `Giro ${s.lap}/${s.laps}` : '';
+  document.body.classList.toggle('kart-mg', kartPlay);
   let msg = '';
-  if (s.phase === 'intro') msg = 'Si parte! Premi DERAPA per saltare il giro di pista';
+  if (kartPlay) msg = s.pit.stage === 'count' ? 'Minigioco col kart: guarda la TV!' : (s.pit.kl || '');
+  if (kartPlay) { /* già scritto sopra */ }
+  else if (s.phase === 'intro') msg = 'Si parte! Premi DERAPA per saltare il giro di pista';
   else if (s.phase === 'countdown') msg = 'Premi DERAPA appena prima del VIA per il turbo!';
   else if (s.cop) msg = 'Documenti, prego!';
   else if (s.finished) msg = 'Traguardo!';

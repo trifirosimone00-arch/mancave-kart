@@ -14,8 +14,9 @@ import { CPU_LEVELS, CPU_NAMES, newBrain, cpuInput } from './ai.js';
 import {
   PIT_FRACTION, PIT_INTRO, PIT_COUNT, PIT_RESULTS, PIT_GO, PIT_MIN_SKIP, LAMPO_CHANCE, LAMPO_MAX, LAMPO, LAMPO_IDS, cpuLampoTime, liveState, rng,
   TIE_INTRO, TIE_TAP, pitLaps, GAMES, GAME_IDS, gameDuration, gameRounds, rankGame, tieGroups, applyTie,
-  liveLabel, liveBar, prizeFor, cpuMgNew, cpuMgTick, buildQuiz, duelStart, duelRound, duelPairOf, semRoundTime, QUIZ_CATS,
+  liveLabel, liveBar, prizeFor, cpuMgNew, cpuMgTick, buildQuiz, duelStart, duelRound, duelPairOf, semRoundTime, QUIZ_CATS, PHONE_IDS, KART_MG_IDS,
 } from './minigames.js';
+import { kgInit, kgStep, kgDone, kgCpu, spawnOf, stepArenaKart, arenaSolids, KART_GAMES } from './arena.js';
 import { drawPit } from './mg-tv.js';
 import { createAudio } from './audio.js';
 
@@ -71,6 +72,8 @@ const W = {                       // stato della stanza (sul PC principale è la
   pit: null, pitsDone: 0, pitUsed: [], lampo: null,
 };
 W.mgShort = !!store.get('mg-short', false);
+// tipo di minigiochi ai pit stop: 'phone' (solo telefono), 'kart' (solo col kart), 'mix' (misti)
+W.mgType = ['phone', 'kart', 'mix'].includes(store.get('mg-type', 'mix')) ? store.get('mg-type', 'mix') : 'mix';
 W.quizCats = (store.get('quiz-cats', QUIZ_CATS) || []).filter(c => QUIZ_CATS.includes(c));
 // la categoria Musica è nuova: la accendo una volta anche a chi aveva già salvato le sue scelte
 if (!store.get('quiz-musica-on', false)) { if (!W.quizCats.includes('Musica')) W.quizCats.push('Musica'); store.set('quiz-cats', W.quizCats); store.set('quiz-musica-on', true); }
@@ -646,6 +649,7 @@ function simStep() {
   }
   if (W.phase === 'pit') {
     pitLocalStep();
+    arenaLocalStep();
     if (MASTER) pitStep();
     return;
   }
@@ -857,7 +861,7 @@ function comboCards(slot, a, b) {
 }
 
 function useCard(slot, i, to) {
-  if (W.phase !== 'race' || W.paused) return;
+  if (W.phase !== 'race' || W.paused || W.lampo) return;
   const h = hands.get(slot), k = karts.get(slot);
   if (!h || !k || k.finished || h.cd > 0) return;
   const id = h.cards[i];
@@ -1167,7 +1171,7 @@ function onPhaseChange() {
 let lobbySig = '';
 let cpuLevel = CPU_LEVELS[store.get('cpu-level', 'normale')] ? store.get('cpu-level', 'normale') : 'normale';
 function drawLobby() {
-  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel, W.mgShort, W.quizCats, track.id, W.night, photoVer]);
+  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel, W.mgShort, W.mgType, W.quizCats, track.id, W.night, photoVer]);
   if (sig === lobbySig) return;
   lobbySig = sig;
   const el = $('players');
@@ -1321,6 +1325,16 @@ function drawMgSettings() {
     b.onclick = () => { W.mgShort = v; store.set('mg-short', v); lobbySig = ''; drawLobby(); };
     len.appendChild(b);
   }
+  const ty = $('mg-type');
+  if (ty) {
+    ty.innerHTML = '';
+    for (const [v, t] of [['phone', '📱 Telefono'], ['kart', '🏎️ Col kart'], ['mix', '🔀 Misti']]) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = t; b.className = W.mgType === v ? 'on' : '';
+      b.onclick = () => { W.mgType = v; store.set('mg-type', v); lobbySig = ''; drawLobby(); };
+      ty.appendChild(b);
+    }
+  }
   const cats = $('quiz-cats');
   cats.innerHTML = '';
   const short = { 'Cultura': 'Cultura', 'Calcio': 'Calcio', 'Videogiochi e film': 'Giochi e film', 'Mancave': 'Mancave' };
@@ -1469,9 +1483,11 @@ function checkPit() {
 function startPit(grid = false) {
   const forced = params.get('mg');
   W.pitsDone++;
-  if (!grid && (forced === 'lampo' || (!(forced && GAMES[forced]) && Math.random() < LAMPO_CHANCE))) { W.pitsDone--; startLampo(); return; }
+  if (!grid && W.mgType !== 'kart' && (forced === 'lampo' || (!(forced && GAMES[forced]) && Math.random() < LAMPO_CHANCE))) { W.pitsDone--; startLampo(); return; }
   W.pitsDone--;
-  const pool = GAME_IDS.filter(g => !W.pitUsed.includes(g));
+  const ids = W.mgType === 'phone' ? PHONE_IDS : W.mgType === 'kart' ? KART_MG_IDS : GAME_IDS.filter(g => g !== 'battaglia');
+  let pool = ids.filter(g => !W.pitUsed.includes(g));
+  if (!pool.length) pool = ids;
   const game = forced && GAMES[forced] ? forced : pool[Math.floor(Math.random() * pool.length)];
   W.pitUsed.push(game);
   if (!grid) W.pitsDone++;
@@ -1489,6 +1505,7 @@ function startPit(grid = false) {
     W.pit.qs = qs.map(({ q, cat, answers }) => ({ q, cat, answers }));
   }
   if (game === 'semaforo') W.pit.duel = duelStart(W.players.map(p => p.slot), seed, short);
+  if (GAMES[game].kart) { W.pit.kart = true; W.pit.ka = kgInit(game, seed, W.players.map(p => p.slot)); W.pit.order = W.players.map(p => p.slot); }
   mgStates.clear();
   W.phase = 'pit';
   onPhaseChange(); pushStatus(true);
@@ -1522,6 +1539,7 @@ function pitInfo(slot) {
     rounds: P.rounds, round: P.round, roundT: r2(P.roundT), reveal: P.reveal, pts: P.pts[slot] || 0, me, places: P.results ? P.results.length : 0,
     q: P.qs && P.round >= 0 ? P.qs[P.round] : null, duel: P.duel || null, tie: P.tie,
     skipped: !!(P.skips && P.skips[slot] === P.stage), canSkip: P.stage === 'intro' || P.stage === 'results',
+    kart: !!P.kart, kl: P.kart && P.ka ? liveLabel(P.game, null, P, slot) : '', kt: P.kart ? Math.max(0, Math.ceil(P.dur - P.t)) : 0,
   };
 }
 
@@ -1548,6 +1566,71 @@ function pitLocalStep() {
     }
   }
 }
+
+// ------------------------------------------------------------------ minigiochi col kart (su ogni schermo, per i propri kart)
+// prima del gioco salvo dove era il kart in gara, lo porto nell'arena, e alla fine lo rimetto dov'era
+const arenaSave = new Map();      // slot -> { id, stato del kart in gara }
+const arenaBrains = new Map();    // slot -> cervello del computer nell'arena
+const SAVE_F = ['x', 'y', 'z', 'yaw', 'speed', 's', 'idx', 'lat', 'prevS', 'lapCount', 'vy', 'air', 'drifting', 'driftDir', 'driftCharge', 'driftT', 'boostT', 'spinT', 'shX', 'shZ', 'pvx', 'pvz'];
+function arenaLocalStep() {
+  const P = W.pit;
+  if (!P || !P.kart) return;
+  const inArena = P.stage === 'intro' || P.stage === 'count' || P.stage === 'play' || P.stage === 'tie';
+  const ka = P.ka;
+  const mine = [];
+  for (const k of karts.values()) {
+    const l = localBySlot(k.slot);
+    if (!l) continue;
+    const sv = arenaSave.get(k.slot);
+    if (inArena) {
+      if (!sv || sv.id !== P.id) {
+        const o = { id: P.id };
+        for (const f of SAVE_F) o[f] = k[f];
+        arenaSave.set(k.slot, o);
+        const order = P.order || W.players.map(p => p.slot);
+        const sp = spawnOf(P.game, Math.max(0, order.indexOf(k.slot)), order.length);
+        Object.assign(k, { x: sp.x, z: sp.z, y: 0, yaw: sp.yaw, speed: 0, vy: 0, air: false, drifting: false, driftDir: 0, driftCharge: 0, boostT: 0, spinT: 0, shX: 0, shZ: 0 });
+        arenaBrains.delete(k.slot);
+      }
+      if (P.stage !== 'play') { k.speed = 0; k.drifting = false; continue; }
+      let input = l.input;
+      if (l.brain) {
+        let b = arenaBrains.get(k.slot);
+        if (!b) { b = {}; arenaBrains.set(k.slot, b); }
+        input = kgCpu(ka, k, [...karts.values()].filter(q => q.slot !== k.slot).map(q => ({ ...(isLocalSlot(q.slot) ? q : (remoteRender(q.slot) || q)), slot: q.slot })), b);
+      }
+      const out = ka.out[k.slot] != null;
+      stepArenaKart(k, input || {}, DT, {
+        out, fall: out && P.game === 'pavimento', stun: (ka.stun[k.slot] || 0) > ka.t,
+        solids: arenaSolids(ka), speedMul: ka.flag && ka.flag.by === k.slot ? 0.88 : 1,
+      });
+      if (out && P.game === 'aspirapolvere') { k.y = Math.max(-6, (k.y || 0) - DT * 8); }
+      if (!out) mine.push(k);
+    } else if (sv && sv.id === P.id) {
+      // fine del gioco: torno in pista dove ero
+      for (const f of SAVE_F) k[f] = sv[f];
+      arenaSave.delete(k.slot);
+    }
+  }
+  if (inArena && P.stage === 'play') {
+    collideKarts(mine);
+    const others = [...karts.values()].filter(k => !isLocalSlot(k.slot) && ka.out[k.slot] == null);
+    collideWithRemote(mine, others.map(k => ({ ...(remoteRender(k.slot) || k), slot: k.slot })));
+    for (const k of mine) {
+      for (const e of k.events) { if (e === 'bump') vibrate(k.slot, [70]); else if (e === 'hit') vibrate(k.slot, [40]); }
+      k.events.length = 0;
+    }
+    // vibrazioni per quello che succede nel gioco (colpito, eliminato, punto)
+    for (const e of ka.fx) {
+      if (arenaFxSeen.has(e.id)) continue;
+      arenaFxSeen.add(e.id);
+      if (e.slot >= 0 && isLocalSlot(e.slot)) vibrate(e.slot, ['boom', 'suck', 'fall', 'scratch', 'pop'].includes(e.kind) ? [300] : ['bam', 'drop'].includes(e.kind) ? [120] : [30, 30, 30]);
+      try { audio.play(['boom', 'pop', 'bam', 'scratch', 'suck', 'fall'].includes(e.kind) ? 'explode' : e.kind === 'goal' || e.kind === 'deliver' || e.kind === 'flag' || e.kind === 'park' ? 'ding' : 'zap'); } catch (err) { /* niente */ }
+    }
+    if (arenaFxSeen.size > 400) arenaFxSeen.clear();
+  }
+}
+const arenaFxSeen = new Set();
 
 function pitStep() {
   const P = W.pit;
@@ -1582,6 +1665,9 @@ function pitStep() {
           pushStatus(true);
         }
       }
+    } else if (P.kart) {
+      kgStep(P.ka, [...karts.values()].map(k => ({ slot: k.slot, x: k.x, z: k.z, yaw: k.yaw, speed: k.speed || 0 })), DT);
+      if (P.t >= P.dur || kgDone(P.ka, W.players.length)) endPlay();
     } else {
       const allDone = W.players.length && W.players.every(p => st(p.slot).done);
       if (P.t >= P.dur || allDone) endPlay();

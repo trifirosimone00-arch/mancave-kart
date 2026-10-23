@@ -258,7 +258,7 @@ function icon(game) {
     porta: `<rect x="12" y="4" width="40" height="56" rx="6" fill="#7a4b26" ${S(4)}/><rect x="18" y="10" width="28" height="50" rx="3" fill="#2ec46b" ${S(3)}/><circle cx="40" cy="36" r="3" fill="#ffd400" ${S(2)}/><text x="32" y="30" class="tz-bt" font-size="14" text-anchor="middle" fill="#fff">?</text>`,
     semaforo: `<rect x="18" y="2" width="28" height="60" rx="10" fill="#363c5e" ${S(4)}/><circle cx="32" cy="16" r="7" fill="#ff3b30" ${S(2.5)}/><circle cx="32" cy="32" r="7" fill="#5a4a18" ${S(2.5)}/><circle cx="32" cy="48" r="7" fill="#1b4a2c" ${S(2.5)}/>`,
     quiz: `<path d="M8 10H56V44H30L18 56V44H8Z" fill="#fff" ${S(4)}/><text x="32" y="38" class="tz-bt" font-size="24" text-anchor="middle" fill="#2f7bff">?</text>`,
-  }[game] || `<path d="${starPath(32, 33, 26, 12, 5)}" fill="#ffd400" ${S(4)}/>`;
+  }[game] || (GAMES[game] && GAMES[game].emoji ? `<text x="32" y="46" font-size="40" text-anchor="middle">${GAMES[game].emoji}</text>` : `<path d="${starPath(32, 33, 26, 12, 5)}" fill="#ffd400" ${S(4)}/>`);
   return svg('0 0 64 64', b);
 }
 
@@ -396,6 +396,25 @@ export function drawPit(el, P, players) {
   flag(el, 'pit-toon', true);
   flag(el, 'pit-clear', P.stage === 'go' || P.stage === 'done');
   const g = GAMES[P.game];
+  // minigioco col kart: durante il gioco si vede l'arena; sopra solo una striscia con tempo e punti
+  flag(el, 'pit-kart', !!(g.kart && P.stage === 'play'));
+  if (g.kart && P.stage === 'play') {
+    if (el._k !== 'kart:' + P.id) {
+      el._k = 'kart:' + P.id;
+      el.innerHTML = `<div class="tz-kstrip"><div class="tz-ktitle"><span>${g.emoji || ''}</span>${esc(g.title)}</div><div class="tz-kclock"></div><div class="tz-krows"></div></div>`;
+      el._kc = el.querySelector('.tz-kclock'); el._kr = el.querySelector('.tz-krows');
+    }
+    const left = P.dur - P.t;
+    setText(el._kc, clock(left));
+    flag(el._kc, 'hurry', left <= 5);
+    const rows = (P.live || []).map(r => {
+      const p = players.find(q => q.slot === r.slot) || { name: '?', color: '#888' };
+      const out = /^Fuori/.test(r.label);
+      return `<div class="tz-krow${out ? ' out' : ''}" style="--c:${esc(p.color)}"><i>${initial(p.name)}</i><b>${esc(p.name)}</b><span>${esc(r.label)}</span></div>`;
+    }).join('');
+    put(el._kr, rows);
+    return;
+  }
 
   // 3-2-1 grande al centro
   if (P.stage === 'count' || P.stage === 'go' || P.stage === 'done') {

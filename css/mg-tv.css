@@ -316,3 +316,20 @@
 @media (prefers-reduced-motion: reduce) {
   .pit-toon *, .pit-toon *::before, .pit-toon *::after { animation-duration: 0.01s !important; animation-iteration-count: 1 !important; }
 }
+
+/* minigiochi col kart: striscia in alto sopra l'arena */
+.pit.pit-toon.pit-kart { background: transparent !important; backdrop-filter: none !important; pointer-events: none; }
+.tz-kstrip { position: absolute; left: 50%; top: 2.2vh; transform: translateX(-50%); display: flex; align-items: center; gap: 1.2vw;
+  padding: 1vh 1.6vw; border-radius: 999px; background: rgba(20, 16, 40, 0.82); border: 4px solid #1d1733; box-shadow: 0 8px 0 rgba(0,0,0,.25); color: #fff;
+  font-family: inherit; white-space: nowrap; max-width: 96vw; }
+.tz-ktitle { font-weight: 900; font-size: 2.6vh; display: flex; align-items: center; gap: .5vw; }
+.tz-ktitle span { font-size: 3.4vh; }
+.tz-kclock { font-weight: 900; font-size: 3.6vh; background: #ffd400; color: #1d1733; border-radius: 1.4vh; padding: .2vh 1vw; min-width: 5.5vw; text-align: center; }
+.tz-kclock.hurry { background: #ff4a3d; color: #fff; animation: tzk-pulse .5s infinite alternate; }
+@keyframes tzk-pulse { to { transform: scale(1.12); } }
+.tz-krows { display: flex; gap: .8vw; }
+.tz-krow { display: flex; align-items: center; gap: .5vw; background: rgba(255,255,255,.1); border-radius: 999px; padding: .4vh .9vw .4vh .4vh; border: 3px solid var(--c); }
+.tz-krow i { width: 3.4vh; height: 3.4vh; border-radius: 50%; background: var(--c); display: grid; place-items: center; font-style: normal; font-weight: 900; font-size: 1.9vh; color: #fff; text-shadow: 0 1px 0 rgba(0,0,0,.4); }
+.tz-krow b { font-size: 1.9vh; max-width: 9vw; overflow: hidden; text-overflow: ellipsis; }
+.tz-krow span { font-size: 2.2vh; font-weight: 900; color: #ffd400; }
+.tz-krow.out { opacity: .45; filter: grayscale(.7); }

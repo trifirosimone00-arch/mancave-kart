@@ -4,6 +4,7 @@
 // vanno a manche decise dal PC principale.
 
 import { QUIZ, QUIZ_CATS as QUIZ_BASE_CATS } from './quiz-data.js';
+import { KART_GAMES, kgRankKey, kgLabel } from './arena.js';
 
 export const PIT_FRACTION = 0.56;        // dove si trova il pit stop nel giro
 export const PIT_INTRO = 10;             // spiegazione del minigioco (si salta col tasto SALTA)
@@ -76,7 +77,11 @@ export const GAMES = {
     help: 'Rispondi dal telefono. Giusta: 10 punti più un bonus se sei veloce. Sbagliata: −5.',
   },
 };
+// minigiochi col kart (si guidano nell'arena): stesse fasi del pit stop
+for (const [id, g] of Object.entries(KART_GAMES)) GAMES[id] = { ...g, kind: 'Col kart', kart: true };
 export const GAME_IDS = Object.keys(GAMES);
+export const PHONE_IDS = GAME_IDS.filter(id => !GAMES[id].kart);
+export const KART_MG_IDS = GAME_IDS.filter(id => GAMES[id].kart && id !== 'battaglia');
 
 export function gameRounds(id, short) { const g = GAMES[id]; return short ? g.shortRounds || g.rounds : g.rounds; }
 export function gameDuration(id, short) {
@@ -334,6 +339,7 @@ export function buildQuiz(seed, n, cats, custom = []) {
 // ritorna [{ slot, place, label }] con parità = stesso posto
 function rankKey(game, s, pit, slot) {
   s = s || {};
+  if (GAMES[game] && GAMES[game].kart) return kgRankKey(pit && pit.ka, slot);
   switch (game) {
     case 'barra': return [s.score || 0];
     case 'pallone': return s.popT != null ? [1, -s.popT] : [0, s.n || 0];
@@ -373,6 +379,7 @@ export function applyTie(ranking, taps, seed) {
 // testo breve per la TV (durante e dopo il gioco)
 export function liveLabel(game, s, pit, slot) {
   s = s || {};
+  if (GAMES[game] && GAMES[game].kart) return kgLabel(pit && pit.ka, slot);
   switch (game) {
     case 'barra': return `${s.score || 0} pt${s.out ? ' · fuori' : ''}`;
     case 'pallone': return s.popT != null ? `BOOM! ${(s.popT / 1000).toFixed(1)}s` : `${Math.round(100 * (s.n || 0) / BALLOON_TAPS)}%`;

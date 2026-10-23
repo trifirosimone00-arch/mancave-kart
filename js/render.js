@@ -6,6 +6,7 @@ import { LAMPO, LAMPO_MAX } from './minigames.js';
 import { buildMancave } from './render-mancave.js';
 import { buildKartModel } from './kart-model.js';
 import { createCardFx } from './card-fx.js';
+import { createArenaView } from './arena-render.js';
 
 const TAG_LAYER0 = 1; // layer delle etichette nome: 1 + slot
 
@@ -546,6 +547,10 @@ export function createRenderer(canvas, hudRoot, track) {
   buildWorld(world, track, night);
   scene.add(world);
   const cfx = createCardFx(scene);
+  const arena = createArenaView(scene, cfx);
+  const arenaCam = new THREE.PerspectiveCamera(50, 16 / 9, 1, 3000);
+  arenaCam.layers.enable(0);
+  for (let s = 0; s < 8; s++) arenaCam.layers.enable(TAG_LAYER0 + s);
   applyLook();
   // aspetto della pista: nebbia, tone mapping, riflessi, sfondo
   function applyLook() {
@@ -869,6 +874,8 @@ export function createRenderer(canvas, hudRoot, track) {
     const now = performance.now();
     const tsec = now / 1000;
 
+    // minigioco col kart: si gioca nell'arena, con una sola telecamera che inquadra tutto
+    const arenaOn = !!(snap.pit && snap.pit.kart && snap.pit.ka && ['intro', 'count', 'play', 'tie'].includes(snap.pit.stage));
     // aggiorna i kart
     snapPhotos = snap.photos || {};
     const present = new Set();
@@ -887,9 +894,11 @@ export function createRenderer(canvas, hudRoot, track) {
       if (k.spinT > 0) m.body.rotation.y = (tsec * 14) % (Math.PI * 2);
       m.wheels.forEach(w => { w.rotation.x += k.speed * dt * 2; });
       // ombra
-      m.shadow.position.set(k.x, Math.max(0, groundHeight(track, k.s, k.lat)) + 0.08, k.z);
+      const gnd = arenaOn ? 0 : Math.max(0, groundHeight(track, k.s, k.lat));
+      m.shadow.position.set(k.x, gnd + 0.08, k.z);
+      m.shadow.visible = !arenaOn || k.y > -1;
       m.shadow.rotation.z = k.yaw;
-      const air = Math.max(0, k.y - groundHeight(track, k.s, k.lat));
+      const air = Math.max(0, k.y - gnd);
       m.shadow.material.opacity = Math.max(0.08, 0.28 - air * 0.03);
       // turbo
       const boosting = k.boostT > 0;
@@ -906,12 +915,12 @@ export function createRenderer(canvas, hudRoot, track) {
       cfx.updateKart(m, k, tsec, dt);
       m.bomb.visible = k.bombT > 0;
       if (m.bomb.visible) m.fuse.visible = Math.sin(tsec * (k.bombT < 3 ? 30 : 12)) > 0;
-      const ghost = k.ghostT > 0;
+      const ghost = k.ghostT > 0 || (arenaOn && snap.pit.ka.out[k.slot] != null);
       if (ghost !== m.ghost) {
         m.mats.forEach(mt => { mt.transparent = ghost; mt.opacity = ghost ? 0.35 : 1; mt.needsUpdate = true; });
         m.ghost = ghost;
       }
-      const sc0 = k.miniT > 0 ? 0.6 : 1;
+      const sc0 = arenaOn ? 1.25 : k.miniT > 0 ? 0.6 : 1;
       m.root.scale.setScalar(m.root.scale.x + (sc0 - m.root.scale.x) * Math.min(1, dt * 8));
       // scintille
       const showSparks = k.drifting && k.driftT > 0.2;
@@ -968,6 +977,17 @@ export function createRenderer(canvas, hudRoot, track) {
       }
     }
 
+    if (arena.update(snap, snap.karts.map(k => ({ slot: k.slot, color: k.color, name: k.name })), karts, dt, tsec)) {
+      hudRoot.classList.add('arena-on');
+      if (!arena.lit) { arena.lit = true; renderer.shadowMap.needsUpdate = true; }
+      for (const m of karts.values()) m.tag.visible = true;
+      arena.placeCamera(arenaCam, W / H, tsec);
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, W, H);
+      renderer.render(scene, arenaCam);
+      return;
+    }
+    if (hudRoot.classList.contains('arena-on')) { hudRoot.classList.remove('arena-on'); arena.lit = false; renderer.shadowMap.needsUpdate = true; }
     const rs = rects(slots.length, W, H);
     renderer.setScissorTest(true);
     views.forEach((v, i) => {

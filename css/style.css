@@ -372,3 +372,6 @@ button { font-family: inherit; cursor: pointer; }
 .pcard .kart.thumb { width: 108px; height: 72px; background-color: transparent; background-size: contain; background-position: center; background-repeat: no-repeat; border-radius: 0; }
 .pcard .kart.thumb::after, .pcard .kart.ph::after { display: none; }
 .pcard .kart.ph { width: 64px; height: 64px; border-radius: 50%; background-size: cover; background-position: center; border: 4px solid #fff; }
+
+/* minigiochi col kart: una sola telecamera sull'arena, niente HUD della gara */
+#hud.arena-on .view, #hud.arena-on .feed { display: none !important; }

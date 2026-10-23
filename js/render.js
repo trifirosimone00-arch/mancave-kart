@@ -4,6 +4,7 @@ import { groundHeight, RAMP_LENGTH, obstaclesAt, locate } from './track.js';
 import { MT_BLUE, MT_ORANGE } from './sim.js';
 import { LAMPO, LAMPO_MAX } from './minigames.js';
 import { buildMancave } from './render-mancave.js';
+import { buildKartModel } from './kart-model.js';
 
 const TAG_LAYER0 = 1; // layer delle etichette nome: 1 + slot
 
@@ -413,49 +414,17 @@ function makeKart(slot, name, color) {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
-  const paint = new THREE.MeshLambertMaterial({ color });
-  const dark = new THREE.MeshLambertMaterial({ color: '#23252d' });
-  const metal = new THREE.MeshLambertMaterial({ color: '#c9ced8' });
-  const white = new THREE.MeshLambertMaterial({ color: '#f4f4f4' });
-  const skin = new THREE.MeshLambertMaterial({ color: '#ffd2a6' });
-
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.45, 3.1), paint); chassis.position.set(0, 0.6, 0); body.add(chassis);
-  const nose = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.38, 0.9), paint); nose.position.set(0, 0.62, 1.85); body.add(nose);
-  const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.25, 0.3), dark); bumper.position.set(0, 0.45, 2.35); body.add(bumper);
-  const side1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.35, 2.0), white); side1.position.set(-1.15, 0.7, 0); body.add(side1);
-  const side2 = side1.clone(); side2.position.x = 1.15; body.add(side2);
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 0.3), dark); seat.position.set(0, 1.25, -0.95); body.add(seat);
-  const wheelsGeo = new THREE.CylinderGeometry(0.48, 0.48, 0.5, 14);
-  const rimGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.52, 10);
-  const wheels = [];
-  for (const [x, z, r] of [[-1.25, 1.15, 0.9], [1.25, 1.15, 0.9], [-1.3, -1.05, 1.08], [1.3, -1.05, 1.08]]) {
-    const w = new THREE.Group();
-    const tyre = new THREE.Mesh(wheelsGeo, dark); tyre.rotation.z = Math.PI / 2; tyre.scale.set(r, 1, r);
-    const rim = new THREE.Mesh(rimGeo, metal); rim.rotation.z = Math.PI / 2;
-    w.add(tyre, rim); w.position.set(x, 0.48 * r, z);
-    body.add(w); wheels.push(w);
-  }
-  const steerWheel = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.07, 6, 14), dark);
-  steerWheel.position.set(0, 1.25, 0.75); steerWheel.rotation.x = -0.9; body.add(steerWheel);
-  // pilota
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 0.95, 10), white); torso.position.set(0, 1.45, -0.35); body.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), skin); head.position.set(0, 2.25, -0.25); body.add(head);
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.58, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.6), paint); helmet.position.set(0, 2.3, -0.3); body.add(helmet);
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.22, 0.2), new THREE.MeshLambertMaterial({ color: '#1b2a4a' })); visor.position.set(0, 2.32, 0.18); body.add(visor);
-  // numero
-  const numTex = canvasTex(64, 64, (g) => {
-    g.fillStyle = '#fff'; g.beginPath(); g.arc(32, 32, 30, 0, 7); g.fill();
-    g.fillStyle = '#111'; g.font = '900 40px Arial Black, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(slot + 1), 32, 35);
-  });
-  const num = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.7), new THREE.MeshBasicMaterial({ map: numTex, transparent: true }));
-  num.position.set(0, 0.85, 2.31); body.add(num);
+  const metal = new THREE.MeshStandardMaterial({ color: '#dfe3ea', roughness: 0.2, metalness: 1 });
+  const model = buildKartModel(slot, color);
+  body.add(model.body);
+  const wheels = model.wheels;
   // scarichi e fiamma del turbo
   const flames = [];
   for (const x of [-0.45, 0.45]) {
     const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.6, 8), metal);
-    pipe.rotation.x = Math.PI / 2; pipe.position.set(x, 0.75, -1.75); body.add(pipe);
+    pipe.rotation.x = Math.PI / 2; pipe.position.set(x, 1.15, -2.2); body.add(pipe);
     const fl = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.6, 8), new THREE.MeshBasicMaterial({ color: '#ff9a1f', transparent: true, opacity: 0.9 }));
-    fl.rotation.x = -Math.PI / 2; fl.position.set(x, 0.75, -2.7); fl.visible = false;
+    fl.rotation.x = -Math.PI / 2; fl.position.set(x, 1.15, -3.1); fl.visible = false;
     body.add(fl); flames.push(fl);
   }
   // scintille della derapata
@@ -521,6 +490,7 @@ export function createRenderer(canvas, hudRoot, track) {
     if (scene.environment) { scene.environment.dispose(); scene.environment = null; }
     if (u.makeEnv) scene.environment = u.makeEnv(renderer);
     renderer.shadowMap.needsUpdate = true;
+    u.refresh = () => { renderer.shadowMap.needsUpdate = true; };
   }
   // cambio pista: butto via il mondo vecchio e costruisco il nuovo
   function setTrack(t) {

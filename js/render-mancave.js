@@ -2,6 +2,39 @@
 // Scala: 1 unità ≈ 2 cm. Il kart è lungo 6 cm, il divano è un palazzo.
 // Luce calda della sera, ombre vere (calcolate una volta sola), riflessi sul parquet.
 import * as THREE from 'three';
+import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
+
+// ------------------------------------------------------------------ modelli 3D gratuiti (Kenney, licenza CC0)
+// colori più vivi al posto di quelli pastello originali
+const RECOLOR = {
+  carpet: '#e0413c', carpetDarker: '#b52d2a', carpetWhite: '#f4f1ea', wood: '#e2a463', woodDark: '#a8683a',
+  metal: '#d5dbe2', metalLight: '#f2f5f8', metalMedium: '#9aa6b2', metalDark: '#3b4250', glass: '#bfe6f5',
+  plant: '#3cbf5c', lamp: '#fff2c0',
+  red: '#e8392f', yellow: '#ffc834', orange: '#ff8a2c', green: '#4cc463', brownLight: '#f2b465', brown: '#c98a4e',
+  brownDark: '#7c4a29', brownDarkest: '#4b2c1b', greyLight: '#eef2f6', greyDark: '#8d97a3', purpleLight: '#ff74c4', _defaultMat: '#ffffff',
+};
+const KCACHE = new Map();
+let LOADER = null;
+function loadK(name) {
+  if (!KCACHE.has(name)) {
+    LOADER = LOADER || new GLTFLoader();
+    KCACHE.set(name, new Promise((res) => LOADER.load(`assets/kenney/${name}.glb`, (g) => {
+      const sc = g.scene;
+      sc.traverse((o) => {
+        if (!o.isMesh) return;
+        const m = o.material;
+        if (RECOLOR[m.name]) m.color.set(RECOLOR[m.name]);
+        const metal = /^metal/.test(m.name);
+        m.metalness = metal ? 0.55 : 0; m.roughness = metal ? 0.3 : 0.62;
+        if (m.name === 'lamp') { m.emissive.set('#ffe6a0'); m.emissiveIntensity = 0.9; }
+        if (m.name === 'glass') { m.transparent = true; m.opacity = 0.45; m.roughness = 0.05; }
+      });
+      const box = new THREE.Box3().setFromObject(sc);
+      res({ scene: sc, box });
+    }, undefined, (e) => { console.warn('modello non caricato', name, e); res(null); })));
+  }
+  return KCACHE.get(name);
+}
 
 function rng(seed) {
   let s = seed >>> 0;
@@ -35,7 +68,7 @@ function parquetTex(R) {
   b.fillStyle = '#808080'; b.fillRect(0, 0, S / 2, S / 2);
   const plank = (x, y, seed) => {
     const r = rng(seed);
-    const hue = 24 + r() * 8, sat = 42 + r() * 16, lig = 28 + r() * 13;
+    const hue = 26 + r() * 8, sat = 50 + r() * 14, lig = 42 + r() * 12;
     g.fillStyle = `hsl(${hue},${sat}%,${lig}%)`; g.fillRect(x, y, PW, PL);
     // venature lunghe e ondulate
     for (let k = 0; k < 34; k++) {
@@ -273,6 +306,33 @@ export function buildMancave(root, track) {
   function distTrack(x, z) { let bd = Infinity; for (let i = 0; i < count; i += 2) { const d = (pts[i].x - x) ** 2 + (pts[i].z - z) ** 2; if (d < bd) bd = d; } return Math.sqrt(bd); }
   const free = (x, z, r) => distTrack(x, z) > wall + r;
 
+  // mette un modello Kenney: (x, z) è il centro, y la base; scala uniforme (s) o su misura (w, h, d nelle misure del modello)
+  const pending = [];
+  function K(name, o) {
+    const pr = loadK(name).then((m) => {
+      if (!m) return null;
+      const size = m.box.getSize(new THREE.Vector3()), ctr = m.box.getCenter(new THREE.Vector3());
+      let sx, sy, sz;
+      if (o.s) sx = sy = sz = o.s;
+      else {
+        const u = o.h ? o.h / size.y : o.w ? o.w / size.x : o.d / size.z;
+        sx = o.w ? o.w / size.x : u; sy = o.h ? o.h / size.y : u; sz = o.d ? o.d / size.z : u;
+      }
+      const inner = m.scene.clone(true);
+      if (o.colors) inner.traverse((q) => { if (q.isMesh && o.colors[q.material.name]) { q.material = q.material.clone(); q.material.color.set(o.colors[q.material.name]); } });
+      inner.position.set(-ctr.x, -m.box.min.y, -ctr.z);
+      const pivot = new THREE.Group(); pivot.scale.set(sx, sy, sz); pivot.add(inner);
+      const outer = new THREE.Group(); outer.position.set(o.x, o.y || 0, o.z); outer.rotation.y = o.ry || 0; outer.add(pivot);
+      if (o.tilt) outer.rotation.x = o.tilt;
+      root.add(outer);
+      outer.userData.size = new THREE.Vector3(size.x * sx, size.y * sy, size.z * sz);
+      if (o.then) o.then(outer);
+      return outer;
+    });
+    pending.push(pr);
+    return pr;
+  }
+
   // ---------------------------------------------------------------- materiali
   const std = (o) => new THREE.MeshStandardMaterial(o);
   const tile = (t, size) => { const c = t.clone(); c.needsUpdate = true; c.repeat.set(1 / size, 1 / size); return c; };
@@ -282,8 +342,8 @@ export function buildMancave(root, track) {
     road: std({ map: ROAD.map, bumpMap: ROAD.bump, bumpScale: 0.6, roughness: 0.62, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }),
     rail: std({ color: '#f1efe9', roughness: 0.38 }),
     railTop: std({ color: '#d63a2f', roughness: 0.4 }),
-    paint: std({ map: paintTex(R), color: '#d9d2c7', roughness: 0.92 }),
-    ceiling: std({ color: '#ebe6dd', roughness: 0.95 }),
+    paint: std({ map: paintTex(R), color: '#f7dfa6', roughness: 0.92 }),
+    ceiling: std({ color: '#fbf6ec', roughness: 0.95 }),
     white: std({ color: '#f3f1ec', roughness: 0.55 }),
     black: std({ color: '#151517', roughness: 0.45 }),
     blackMatte: std({ color: '#1d1d20', roughness: 0.85 }),
@@ -395,8 +455,16 @@ export function buildMancave(root, track) {
   }
   const raised = (i) => H(i) > 0.3 && Z(i) !== 'table' && Z(i) !== 'pouf';
   const support = (i) => H(i) > 0.3 && Z(i) !== 'table';
+  const kerbC = canvas(16, 64), kg = kerbC.getContext('2d');
+  kg.fillStyle = '#f4f4f4'; kg.fillRect(0, 0, 16, 64); kg.fillStyle = '#e8322b'; kg.fillRect(0, 0, 16, 32);
+  const kerbT = toTex(kerbC, { repeat: [1, 1] });
+  const kerbMat = std({ map: kerbT, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+  const curvy = (i) => Math.abs(P(i - 5).tx * P(i + 5).tz - P(i - 5).tz * P(i + 5).tx) > 0.12;
   for (const [a, b] of runs) {
     strip(a, b, -hw, hw, 0.06, M.road, hw * 4);
+    // cordoli rossi e bianchi nelle curve
+    strip(a, b, -hw - 1.8, -hw, 0.1, kerbMat, 5, curvy).userData.noCast = true;
+    strip(a, b, hw, hw + 1.8, 0.1, kerbMat, 5, curvy).userData.noCast = true;
     // sotto la pista in salita: la rampa di cartone, il cuneo di gommapiuma dopo il pouf
     const isRamp = (i) => raised(i) && Z(i) === 'ramp';
     const isWedge = (i) => raised(i) && Z(i) !== 'ramp';
@@ -448,91 +516,53 @@ export function buildMancave(root, track) {
   // ---------------------------------------------------------------- parete TV (sud)
   {
     const z0 = -RZ;
-    // pannello a listelli di legno
-    box(220, RH, 0.6, M.blackMatte, 0, RH / 2, z0 + 0.4);
-    const slat = new THREE.BoxGeometry(3, RH, 2);
-    const n = 44, inst = new THREE.InstancedMesh(slat, M.slat, n), mm = new THREE.Matrix4();
-    for (let i = 0; i < n; i++) { mm.makeTranslation(-108 + i * 5, RH / 2, z0 + 1.8); inst.setMatrixAt(i, mm); }
-    inst.userData.noCast = true; root.add(inst);
-    // mobile TV sospeso
-    rbox(170, 24, 26, 1.2, M.walnutBox, 0, 18, z0 + 15);
-    for (let i = 0; i < 4; i++) {
-      box(0.3, 20, 0.3, M.black, -85 + 42.5 * (i + 0.5) - 21, 18, z0 + 28.1).visible = i > 0;
-      box(14, 1, 1, M.brass, -85 + 42.5 * (i + 0.5), 25, z0 + 28.4);
-    }
-    box(170, 0.3, 0.3, M.black, 0, 6.2, z0 + 28.1);
-    // TV
-    const tv = new THREE.Group(); tv.position.set(0, 66, z0 + 3.2); root.add(tv);
-    add(new THREE.BoxGeometry(76, 43, 1.4), M.black, 0, 0, 0, 0, tv);
-    const scr = new THREE.Mesh(new THREE.PlaneGeometry(74, 41.5), new THREE.MeshBasicMaterial({ map: screenTex(), toneMapped: false }));
-    scr.position.z = 0.75; scr.userData.noShadow = true; tv.add(scr);
+    // parete colorata dietro la TV
+    box(230, RH, 0.6, std({ color: '#2f6fb3', roughness: 0.9 }), 0, RH / 2, z0 + 0.4).userData.noCast = true;
+    // mobile TV, TV, casse, piante
+    K('cabinetTelevision', { x: 0, z: z0 + 16, w: 170, h: 30, d: 30 });
+    K('televisionModern', { x: 0, z: z0 + 14, y: 30, s: 125, then: (tv) => {
+      const sz = tv.userData.size;
+      const scr = new THREE.Mesh(new THREE.PlaneGeometry(sz.x * 0.93, sz.y * 0.74), new THREE.MeshBasicMaterial({ map: screenTex(), toneMapped: false }));
+      scr.position.set(0, sz.y * 0.6, sz.z / 2 + 0.3); scr.userData.noShadow = true; tv.add(scr);
+    } });
+    K('speaker', { x: -105, z: z0 + 14, s: 110, ry: 0.15 });
+    K('speaker', { x: 105, z: z0 + 14, s: 110, ry: -0.15 });
+    K('pottedPlant', { x: -150, z: z0 + 18, s: 190 });
+    K('radio', { x: 55, z: z0 + 18, y: 30, s: 70, ry: -0.3 });
+    K('books', { x: -55, z: z0 + 18, y: 30, s: 90, ry: 0.2 });
     // luce LED dietro la TV
     const glow = canvas(256, 256), gg = glow.getContext('2d');
-    const gr = gg.createRadialGradient(128, 128, 30, 128, 128, 128); gr.addColorStop(0, 'rgba(140,90,255,0.9)'); gr.addColorStop(1, 'rgba(140,90,255,0)');
+    const gr = gg.createRadialGradient(128, 128, 30, 128, 128, 128); gr.addColorStop(0, 'rgba(120,200,255,0.8)'); gr.addColorStop(1, 'rgba(120,200,255,0)');
     gg.fillStyle = gr; gg.fillRect(0, 0, 256, 256);
-    const g2 = new THREE.Mesh(new THREE.PlaneGeometry(130, 90), new THREE.MeshBasicMaterial({ map: toTex(glow), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-    g2.position.set(0, 66, z0 + 2.5); g2.userData.noShadow = true; root.add(g2);
-    // soundbar, console, joypad, piantina
-    rbox(64, 4, 7, 1.5, M.blackMatte, 0, 32, z0 + 22);
-    rbox(9, 22, 18, 2, M.white, 58, 41, z0 + 14);
-    box(1.4, 21, 16, M.black, 58, 41, z0 + 14);
-    rbox(12, 2, 8, 1.5, M.blackMatte, 30, 31, z0 + 20, 0.4);
-    add(new THREE.LatheGeometry([[0, 0], [5, 0], [6, 9], [5.5, 10], [0, 10]].map(([x, y]) => new THREE.Vector2(x, y)), 20), M.white, -60, 30, z0 + 14);
-    for (let i = 0; i < 7; i++) { const l = new THREE.Mesh(new THREE.ConeGeometry(1.4, 9, 6), std({ color: '#5a8a4a', roughness: 0.7 })); l.position.set(-60 + Math.cos(i) * 2, 44, z0 + 14 + Math.sin(i) * 2); l.rotation.set(Math.sin(i * 2) * 0.5, 0, Math.cos(i * 2) * 0.5); root.add(l); }
-    // casse da pavimento
-    for (const x of [-100, 100]) {
-      rbox(20, 62, 20, 1.5, M.walnutBox, x, 31, z0 + 14);
-      box(17, 54, 0.4, std({ color: '#2b2b2e', roughness: 1 }), x, 33, z0 + 24.2);
-      for (const [y, r] of [[52, 3.5], [36, 6], [18, 6]]) { const c = cyl(r, r, 0.6, M.black, x, y, z0 + 24.6); c.rotation.x = Math.PI / 2; const dc = cyl(r * 0.35, r * 0.35, 0.8, M.steelDark, x, y, z0 + 24.8); dc.rotation.x = Math.PI / 2; }
-    }
+    const g2 = new THREE.Mesh(new THREE.PlaneGeometry(150, 100), new THREE.MeshBasicMaterial({ map: toTex(glow), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    g2.position.set(0, 62, z0 + 1); g2.userData.noShadow = true; root.add(g2);
   }
 
-  // ---------------------------------------------------------------- divano (nord): la pista ci passa sotto
+  // ---------------------------------------------------------------- divano (nord): rialzato sulle gambe, la pista ci passa sotto
   {
-    const x0 = -85, x1 = 60, z0 = 112, z1 = 172, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, W = x1 - x0, D = z1 - z0;
-    for (const x of [x0 + 4, cx, x1 - 4]) for (const z of [z0 + 3, z1 - 3]) cyl(1.3, 1.8, 14, M.darkWood, x, 7, z, 12);
-    rbox(W, 9, D, 2, M.sofaDark, cx, 18.5, cz);
-    // braccioli
-    for (const x of [x0 + 7, x1 - 7]) rbox(14, 26, D, 4, M.sofa, x, 27, cz);
-    // schienale e cuscini
-    rbox(W - 28, 30, 13, 4, M.sofaDark, cx, 37, z1 - 7);
-    const cw = (W - 28) / 3;
-    for (let i = 0; i < 3; i++) {
-      const x = x0 + 14 + cw * (i + 0.5);
-      rbox(cw - 1, 10, D - 16, 4, M.sofa, x, 27.5, z0 + (D - 16) / 2 + 1);
-      const b = rbox(cw - 2, 24, 10, 4.5, M.sofa, x, 42, z1 - 17); b.rotation.x = -0.18;
-    }
-    const pa = rbox(20, 20, 7, 3.5, M.pillowA, x0 + 26, 40, z1 - 26); pa.rotation.set(-0.35, 0.3, 0.12);
-    const pb = rbox(18, 18, 7, 3.5, M.pillowB, x1 - 26, 39, z1 - 26); pb.rotation.set(-0.3, -0.25, -0.1);
-    // plaid piegato sul bracciolo
-    rbox(16, 3, 30, 1.4, M.blanket, x1 - 7, 41.5, cz - 4);
-    // sotto il divano: polvere, monete, un calzino perso
+    const x0 = -85, x1 = 60, z0 = 112, z1 = 172, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, lift = 17;
+    for (const x of [x0 + 6, cx, x1 - 6]) for (const z of [z0 + 5, z1 - 5]) cyl(1.8, 1.3, lift, std({ color: '#7a4a29', roughness: 0.5 }), x, lift / 2, z, 12);
+    box(x1 - x0 - 4, 2, z1 - z0 - 4, std({ color: '#7a4a29', roughness: 0.6 }), cx, lift - 1, cz);
+    K('loungeSofa', { x: cx, z: cz, y: lift, w: x1 - x0, d: z1 - z0, h: 66, ry: Math.PI });
+    K('pillowBlue', { x: x0 + 30, z: z1 - 22, y: lift + 26, s: 95, ry: Math.PI + 0.3, tilt: -0.2 });
+    K('pillow', { x: x1 - 30, z: z1 - 22, y: lift + 26, s: 95, ry: Math.PI - 0.3, tilt: -0.2 });
+    // sotto il divano: polvere e monetine
     for (let k = 0; k < 9; k++) {
-      const x = x0 + 8 + R() * (W - 16), z = R() < 0.5 ? z0 + 4 + R() * 6 : z1 - 4 - R() * 6;
+      const x = x0 + 8 + R() * (x1 - x0 - 16), z = R() < 0.5 ? z0 + 4 + R() * 6 : z1 - 4 - R() * 6;
       const d = new THREE.Mesh(new THREE.SphereGeometry(1.5 + R() * 1.6, 7, 5), M.dust); d.scale.y = 0.45; d.position.set(x, 0.6, z); root.add(d);
     }
-    for (let k = 0; k < 5; k++) { const x = x0 + 10 + R() * (W - 20), z = z0 + 5 + R() * 4; cyl(1.2, 1.2, 0.2, M.brass, x, 0.12, z, 16); }
-    const sock = rbox(5, 1.2, 12, 0.6, fabric('#e5e1d8', 6), x0 + 20, 0.6, z1 - 6, 0.7);
+    for (let k = 0; k < 5; k++) { const x = x0 + 10 + R() * (x1 - x0 - 20), z = z0 + 5 + R() * 4; cyl(1.2, 1.2, 0.2, M.brass, x, 0.12, z, 16); }
   }
 
   // ---------------------------------------------------------------- tavolino (la pista ci sale sopra, senza sponde)
   {
     const x0 = -100, x1 = 14, z0 = 14, z1 = 80, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, top = 18;
-    rbox(x1 - x0, 3, z1 - z0, 0.8, M.oak, cx, top - 1.5, cz);
-    // ripiano sotto e gambe di metallo nero
-    rbox(x1 - x0 - 10, 1.5, z1 - z0 - 10, 0.5, M.oak, cx, 5, cz);
-    for (const x of [x0 + 4, x1 - 4]) for (const z of [z0 + 4, z1 - 4]) cyl(0.9, 0.9, top - 3, M.steelDark, x, (top - 3) / 2, z, 12);
-    // riviste sul ripiano basso
-    for (let k = 0; k < 4; k++) { const m = box(20, 0.6, 27, std({ color: ['#c0392b', '#2c3e50', '#f1c40f', '#ecf0f1'][k], roughness: 0.4 }), cx - 20 + k * 3, 6.1 + k * 0.6, cz - 6 + k * 2); m.rotation.y = k * 0.2; }
-    // sul piano: cartone della pizza, birre, ciotola di patatine, telecomando
-    const onTop = (x, z, r) => free(x, z, r) || distTrack(x, z) > hw + r + 1.5;
-    const items = [];
-    const place = (x, z, r, fn) => { if (onTop(x, z, r) && x - r > x0 && x + r < x1 && z - r > z0 && z + r < z1) { fn(x, z); items.push([x, z]); } };
-    place(-30, 30, 13, (x, z) => { rbox(24, 1.6, 24, 0.3, std({ color: '#e3d3b4', roughness: 0.9 }), x, top + 0.8, z, 0.25); });
-    place(2, 28, 4, (x, z) => bottle(x, top, z, M.glassAmber));
-    place(6, 20, 4, (x, z) => can(x, top, z));
-    place(-90, 70, 7, (x, z) => { add(new THREE.LatheGeometry([[0, 0], [5, 0], [8, 4], [8.4, 4.4], [0, 4.4]].map(([a, b]) => new THREE.Vector2(a, b)), 24), M.white, x, top, z); for (let i = 0; i < 14; i++) { const c = new THREE.Mesh(new THREE.CircleGeometry(1.2, 6), std({ color: '#e8b64c', roughness: 0.6, side: THREE.DoubleSide })); c.position.set(x + (R() - 0.5) * 9, top + 4.3 + R(), z + (R() - 0.5) * 9); c.rotation.set(-Math.PI / 2 + (R() - 0.5), R(), 0); root.add(c); } });
-    place(-55, 22, 6, (x, z) => { rbox(4, 1, 12, 0.5, M.blackMatte, x, top + 0.5, z, 0.9); });
+    K('tableCoffee', { x: cx, z: cz, w: x1 - x0, h: top, d: z1 - z0 });
+    // sul piano, lontano dalla pista: pizza, lattina, patatine
+    const onTop = (x, z, r) => distTrack(x, z) > hw + r + 2 && x - r > x0 && x + r < x1 && z - r > z0 && z + r < z1;
+    if (onTop(-30, 30, 13)) K('pizzaBox', { x: -30, z: 30, y: top, s: 26, ry: 0.25 });
+    if (onTop(4, 24, 5)) K('sodaCan', { x: 4, z: 24, y: top, s: 30 });
+    if (onTop(-88, 70, 6)) K('fries', { x: -88, z: 70, y: top, s: 45, ry: 0.6 });
   }
 
   // ---------------------------------------------------------------- pouf (atterraggio dopo il salto)
@@ -541,42 +571,28 @@ export function buildMancave(root, track) {
     add(new THREE.LatheGeometry(prof, 40), M.pouf, 26, 0, 50);
   }
 
-  // ---------------------------------------------------------------- bar (est): bancone, sgabelli, mensole, insegna
+  // ---------------------------------------------------------------- bar (est): bancone, sgabelli, bottiglie, insegna
   {
-    const xw = RX, z0 = -60, z1 = 60;
-    rbox(32, 52, z1 - z0, 1, M.darkWood, xw - 18, 26, 0);
-    for (let z = z0 + 10; z < z1; z += 10) box(0.4, 46, 0.4, M.black, xw - 34.1, 26, z);
-    rbox(37, 3, z1 - z0 + 4, 0.6, M.granite, xw - 19, 53.5, 0);
-    const rail = cyl(0.8, 0.8, z1 - z0, M.brass, xw - 38, 9, 0, 12); rail.rotation.x = Math.PI / 2;
-    for (const z of [z0 + 6, z1 - 6]) box(4, 1, 1, M.brass, xw - 36, 9, z);
+    const xw = RX;
+    // bancone fatto di tre pezzi, rivolto verso la stanza
+    for (const z of [-50, 0, 50]) K('kitchenBar', { x: xw - 14, z, h: 52, w: 50, d: 28, ry: -Math.PI / 2 });
     // sgabelli
-    for (const z of [-38, 0, 38]) {
-      cyl(8, 8, 1, M.chrome, xw - 36, 0.5, z, 28);
-      cyl(1.1, 1.1, 36, M.chrome, xw - 36, 18, z, 12);
-      const ring = add(new THREE.TorusGeometry(5.5, 0.45, 8, 28), M.chrome, xw - 36, 14, z); ring.rotation.x = Math.PI / 2;
-      add(new THREE.LatheGeometry([[0, 0], [8, 0], [8.8, 1.5], [8.6, 3.5], [0, 3.5]].map(([a, b]) => new THREE.Vector2(a, b)), 28), M.leather, xw - 36, 36, z);
-    }
-    // spillatore e bicchiere
-    cyl(1.2, 1.6, 14, M.chrome, xw - 22, 62, -20, 16);
-    const tap = cyl(0.6, 0.6, 6, M.chrome, xw - 25, 67, -20, 10); tap.rotation.z = Math.PI / 2;
-    add(new THREE.LatheGeometry([[0, 0], [2.5, 0], [3.2, 9], [0, 9]].map(([a, b]) => new THREE.Vector2(a, b)), 20), M.glassClear, xw - 26, 55, -10);
-    // mensole con bottiglie
-    const glassMats = [M.glassAmber, M.glassGreen, M.glassClear, std({ color: '#5a1d1d', roughness: 0.08, transparent: true, opacity: 0.85 })];
-    for (const y of [76, 96]) {
-      box(14, 1, 110, M.glassClear, xw - 7, y, 0).userData.noCast = true;
-      for (let z = -48; z <= 48; z += 8 + R() * 5) bottle(xw - 7, y + 0.5, z, glassMats[Math.floor(R() * 4)], 0.8 + R() * 0.5);
-      // luce LED sotto la mensola
-      const led = box(1, 0.4, 108, new THREE.MeshBasicMaterial({ color: '#ffd9a0', toneMapped: false }), xw - 2, y - 0.8, 0); led.userData.noShadow = true;
+    for (const z of [-40, 0, 40]) K('stoolBar', { x: xw - 34, z, h: 38, ry: Math.PI / 2 });
+    // sul bancone: bottiglie, cocktail, bicchieri
+    K('wineRed', { x: xw - 16, z: -30, y: 52, s: 30 });
+    K('sodaBottle', { x: xw - 18, z: -18, y: 52, s: 28 });
+    K('cocktail', { x: xw - 20, z: 12, y: 52, s: 34 });
+    K('glass', { x: xw - 20, z: 30, y: 52, s: 34 });
+    K('sodaCan', { x: xw - 14, z: 44, y: 52, s: 28 });
+    // mensole sul muro con altre bottiglie
+    for (const y of [78, 98]) {
+      box(12, 1.6, 120, std({ color: '#a8683a', roughness: 0.5 }), xw - 6, y, 0);
+      for (let z = -52; z <= 52; z += 13) K(R() < 0.5 ? 'wineRed' : 'sodaBottle', { x: xw - 6, z: z + R() * 4, y: y + 0.8, s: 22 + R() * 8 });
     }
     const neon = new THREE.Mesh(new THREE.PlaneGeometry(90, 22), new THREE.MeshBasicMaterial({ map: neonTex('Mancave', '#ff3d9a'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
-    neon.position.set(xw - 0.6, 116, 0); neon.rotation.y = -Math.PI / 2; neon.userData.noShadow = true; root.add(neon);
-    // frigo per le birre con l'anta di vetro
-    const fz = 95, fx = xw - 16;
-    rbox(28, 52, 26, 1.5, M.blackMatte, fx, 26, fz);
-    const inside = box(24, 46, 20, new THREE.MeshBasicMaterial({ color: '#dff3ff', toneMapped: false }), fx - 1, 26, fz); inside.userData.noShadow = true;
-    for (const y of [9, 22, 35]) for (let k = 0; k < 4; k++) can(fx - 8, y, fz - 7 + k * 4.6, 0.85);
-    box(0.5, 48, 22, M.glassClear, fx - 14.2, 26, fz).userData.noShadow = true;
-    box(1, 30, 1.4, M.chrome, fx - 14.6, 30, fz + 9);
+    neon.position.set(xw - 0.6, 118, 0); neon.rotation.y = -Math.PI / 2; neon.userData.noShadow = true; root.add(neon);
+    // frigo delle birre
+    K('kitchenFridgeSmall', { x: xw - 18, z: 100, h: 56, ry: -Math.PI / 2 });
   }
 
   // ---------------------------------------------------------------- birra rovesciata (si scivola)
@@ -604,30 +620,22 @@ export function buildMancave(root, track) {
 
   // ---------------------------------------------------------------- tavolo da pranzo (ovest): la pista ci passa sotto
   {
-    const x0 = -198, x1 = -138, z0 = -130, z1 = -50, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, top = 37;
-    rbox(x1 - x0, 3, z1 - z0, 0.8, M.walnut, cx, top - 1.5, cz);
-    for (const x of [x0 + 3, x1 - 3]) for (const z of [z0 + 3, z1 - 3]) box(3.6, top - 3, 3.6, M.walnutBox, x, (top - 3) / 2, z);
-    box(x1 - x0 - 8, 4, 1.2, M.walnutBox, cx, top - 5, z0 + 3); box(x1 - x0 - 8, 4, 1.2, M.walnutBox, cx, top - 5, z1 - 3);
-    // sedie dal lato libero
-    for (const z of [-72, -100]) {
-      const x = -126;
-      if (!free(x, z, 12)) continue;
-      rbox(22, 2.5, 22, 0.8, M.walnutBox, x, 22, z);
-      for (const dx of [-9.5, 9.5]) for (const dz of [-9.5, 9.5]) box(1.6, 21, 1.6, M.walnutBox, x + dx, 10.5, z + dz);
-      rbox(2, 22, 22, 0.8, M.walnutBox, x + 10, 34, z);
-    }
-    // sopra il tavolo: lampada e fruttiera
-    add(new THREE.LatheGeometry([[0, 0], [9, 0], [10, 5], [0, 5]].map(([a, b]) => new THREE.Vector2(a, b)), 28), M.white, cx, top, cz + 10);
-    for (let k = 0; k < 5; k++) { const f = new THREE.Mesh(new THREE.SphereGeometry(2.6, 14, 10), std({ color: ['#e67e22', '#c0392b', '#f1c40f', '#27ae60', '#e67e22'][k], roughness: 0.5 })); f.position.set(cx + Math.cos(k * 1.3) * 4, top + 5, cz + 10 + Math.sin(k * 1.3) * 4); root.add(f); }
+    const x0 = -198, x1 = -138, z0 = -130, z1 = -50, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, top = 38;
+    K('table', { x: cx, z: cz, w: z1 - z0, h: top, d: x1 - x0, ry: Math.PI / 2 });
+    for (const z of [-72, -102]) if (free(-122, z, 12)) K('chair', { x: -122, z, h: 48, ry: -Math.PI / 2 });
+    K('cupcake', { x: cx - 8, z: cz + 14, y: top, s: 40 });
+    K('donutSprinkles', { x: cx + 6, z: cz - 10, y: top, s: 40 });
   }
 
   // ---------------------------------------------------------------- finestra (ovest) con il tramonto
   {
     const zc = 40, y0 = 42, y1 = 118, w = 84;
     const c = canvas(256, 256), g = c.getContext('2d');
-    const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, '#2c3e70'); gr.addColorStop(0.55, '#c86b5b'); gr.addColorStop(0.85, '#f5b26b'); gr.addColorStop(1, '#ffd79a');
+    const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, '#3d9bff'); gr.addColorStop(0.7, '#a9dcff'); gr.addColorStop(1, '#e6f6ff');
     g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
-    g.fillStyle = '#1d1a26'; for (let x = 0; x < 256; x += 10 + Math.random() * 18) { const h = 18 + Math.random() * 60; g.fillRect(x, 256 - h, 8 + Math.random() * 14, h); }
+    g.fillStyle = '#ffffff'; for (const [x, y, r] of [[50, 60, 18], [72, 52, 22], [96, 62, 16], [180, 90, 14], [198, 84, 18], [216, 92, 12]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+    g.fillStyle = '#5fbf5a'; g.beginPath(); g.moveTo(0, 256); g.quadraticCurveTo(70, 170, 140, 220); g.quadraticCurveTo(200, 180, 256, 210); g.lineTo(256, 256); g.fill();
+    g.fillStyle = '#e8d3a8'; for (let x = 8; x < 256; x += 34) { const h = 30 + (x * 37 % 40); g.fillRect(x, 256 - h, 22, h); g.fillStyle = '#c4534a'; g.fillRect(x - 2, 256 - h - 6, 26, 7); g.fillStyle = '#e8d3a8'; }
     const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, y1 - y0), new THREE.MeshBasicMaterial({ map: toTex(c), toneMapped: false }));
     glass.position.set(-RX + 0.5, (y0 + y1) / 2, zc); glass.rotation.y = Math.PI / 2; glass.userData.noShadow = true; root.add(glass);
     box(3, 3, w + 6, M.white, -RX + 1.5, y0 - 1.5, zc); box(3, 3, w + 6, M.white, -RX + 1.5, y1 + 1.5, zc);
@@ -664,32 +672,15 @@ export function buildMancave(root, track) {
     cyl(1, 1, 7, M.chrome, dx - 18, 48, RZ - 4, 10).rotation.z = Math.PI / 2;
   }
 
-  // ---------------------------------------------------------------- piante, lampada, oggetti sparsi a terra
-  function plant(x, z, s = 1) {
-    add(new THREE.LatheGeometry([[0, 0], [10 * s, 0], [13 * s, 24 * s], [12 * s, 25 * s], [0, 25 * s]].map(([a, b]) => new THREE.Vector2(a, b)), 28), M.terracotta, x, 0, z);
-    const leafGeo = new THREE.PlaneGeometry(16 * s, 16 * s); leafGeo.translate(0, 8 * s, 0);
-    for (let i = 0; i < 16; i++) {
-      const a = i * 2.4, h = 26 * s + R() * 28 * s, out = 4 + R() * 9 * s;
-      const stem = cyl(0.35 * s, 0.4 * s, h - 22 * s, std({ color: '#4c7a3a', roughness: 0.7 }), x + Math.cos(a) * out * 0.4, 24 * s + (h - 22 * s) / 2, z + Math.sin(a) * out * 0.4, 6);
-      stem.rotation.set(Math.sin(a) * 0.3, 0, -Math.cos(a) * 0.3);
-      const l = new THREE.Mesh(leafGeo, M.leaf);
-      l.position.set(x + Math.cos(a) * out, h, z + Math.sin(a) * out);
-      l.rotation.set(-0.9 - R() * 0.4, -a + Math.PI / 2, 0, 'YXZ'); root.add(l);
-    }
-  }
-  plant(-178, 150, 1.25);
-  plant(178, -150, 1.1);
-  plant(-180, -158, 0.9);
-  // lampada ad arco nell'angolo del divano
-  {
-    const bx = 82, bz = 160;
-    cyl(10, 10, 3, std({ color: '#efece6', roughness: 0.3 }), bx, 1.5, bz, 32);
-    const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(bx, 3, bz), new THREE.Vector3(bx + 10, 150, bz - 10), new THREE.Vector3(bx - 40, 110, bz - 50));
-    add(new THREE.TubeGeometry(curve, 40, 0.8, 8, false), M.chrome, 0, 0, 0);
-    const shade = add(new THREE.SphereGeometry(12, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), std({ color: '#d8d4cc', roughness: 0.4, metalness: 0.5, side: THREE.DoubleSide }), bx - 40, 104, bz - 50);
-    const bulb = add(new THREE.SphereGeometry(3, 16, 10), new THREE.MeshBasicMaterial({ color: '#fff3d6', toneMapped: false }), bx - 40, 103, bz - 50);
-    bulb.userData.noShadow = true; shade.userData.noCast = true;
-  }
+  // ---------------------------------------------------------------- piante, lampada
+  K('pottedPlant', { x: -178, z: 150, s: 230 });
+  K('pottedPlant', { x: 180, z: -152, s: 200, ry: 1 });
+  K('plantSmall1', { x: -180, z: -158, s: 260 });
+  K('lampRoundFloor', { x: 84, z: 158, s: 150 });
+  if (free(-172, 150, 22) && false) K('loungeChair', { x: -172, z: 150, h: 62, ry: Math.PI * 0.75 });
+  if (free(-RX + 16, -28, 26)) K('bookcaseOpen', { x: -RX + 16, z: -28, h: 110, ry: Math.PI / 2 });
+  if (free(-122, -20, 14)) K('cardboardBoxOpen', { x: -122, z: -20, s: 70, ry: 0.4 });
+  K('ceilingFan', { x: -20, z: 20, y: RH - 25, s: 120 });
   // chitarra appoggiata al muro
   {
     const s = new THREE.Shape();
@@ -740,23 +731,17 @@ export function buildMancave(root, track) {
       if (!free(x, z, 6) || Math.abs(x) > RX - 12 || Math.abs(z) > RZ - 12) continue;
       if (x > -100 && x < 14 && z > 14 && z < 80) continue;      // c'è il tavolino
       if (x > -198 && x < -138 && z > -130 && z < -50) continue; // c'è il tavolo
-      const kind = k++ % 5;
-      if (kind === 0) { can(x, 0, z); }
-      else if (kind === 1) {
-        const ball = add(new THREE.SphereGeometry(6, 28, 18), std({ color: '#d86a2a', roughness: 0.7 }), x, 6, z);
-        const seam = add(new THREE.TorusGeometry(6.02, 0.12, 6, 40), M.black, x, 6, z); seam.rotation.y = 0.6;
-        const seam2 = add(new THREE.TorusGeometry(6.02, 0.12, 6, 40), M.black, x, 6, z); seam2.rotation.x = Math.PI / 2;
-      } else if (kind === 2) {
-        const cols = ['#2c3e50', '#8e2c2c', '#d4ac0d', '#1e6f5c'];
-        for (let j = 0; j < 4; j++) { const bk = rbox(22 - j, 3.2, 15 - j * 0.5, 0.4, std({ color: cols[j], roughness: 0.6 }), x, 1.6 + j * 3.3, z, R() * 0.5); bk.rotation.y = R() * 0.6 - 0.3; }
-      } else if (kind === 3) {
-        // scarpa da ginnastica
-        const sh = new THREE.Group(); sh.position.set(x, 0, z); sh.rotation.y = R() * 6; root.add(sh);
-        add(roundBox(10, 2.2, 28, 1), M.white, 0, 1.1, 0, 0, sh);
-        add(roundBox(9, 8, 20, 3.5), std({ color: '#2b3a55', roughness: 0.7 }), 0, 6, -3, 0, sh);
-        add(roundBox(8, 4, 8, 3), std({ color: '#2b3a55', roughness: 0.7 }), 0, 4, 8.5, 0, sh);
-      } else {
-        bottle(x, 0, z, M.glassGreen);
+      // oggetti giganti per un kart: lattine, panini, ciambelle, patatine, bottiglie, palloni
+      const kind = k++ % 6, ry = R() * 6;
+      if (kind === 0) K('sodaCan', { x, z, s: 36, ry });
+      else if (kind === 1) K('burger', { x, z, s: 42, ry });
+      else if (kind === 2) K('donutSprinkles', { x, z, s: 55, ry });
+      else if (kind === 3) K('fries', { x, z, s: 55, ry });
+      else if (kind === 4) K('sodaBottle', { x, z, s: 40, ry });
+      else {
+        add(new THREE.SphereGeometry(6.5, 28, 18), std({ color: '#ff8a2c', roughness: 0.6 }), x, 6.5, z);
+        const seam = add(new THREE.TorusGeometry(6.52, 0.15, 6, 40), M.black, x, 6.5, z); seam.rotation.y = 0.6;
+        const seam2 = add(new THREE.TorusGeometry(6.52, 0.15, 6, 40), M.black, x, 6.5, z); seam2.rotation.x = Math.PI / 2;
       }
     }
   }
@@ -802,26 +787,23 @@ export function buildMancave(root, track) {
     track.obstacleMeshes = { vacuum: vac, cat };
   }
 
-  // ---------------------------------------------------------------- luci
+  // ---------------------------------------------------------------- luci: pomeriggio pieno di sole, colori vivi
   {
-    root.add(new THREE.HemisphereLight('#fff3e2', '#4a3528', 0.3));
-    const key = new THREE.DirectionalLight('#ffe9cf', 2.6);
-    key.position.set(150, 400, 110); key.target.position.set(-10, 0, -10);
+    root.add(new THREE.HemisphereLight('#ffffff', '#c89a6a', 0.85));
+    const key = new THREE.DirectionalLight('#fff4e0', 2.7);
+    key.position.set(-260, 380, 90); key.target.position.set(0, 0, 0);
     key.castShadow = true;
-    const sc = key.shadow.camera; sc.left = -235; sc.right = 235; sc.top = 210; sc.bottom = -210; sc.near = 150; sc.far = 700;
+    const sc = key.shadow.camera; sc.left = -250; sc.right = 250; sc.top = 230; sc.bottom = -230; sc.near = 150; sc.far = 900;
     key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.35; key.shadow.radius = 4;
     root.add(key, key.target);
-    // tramonto dalla finestra
-    const sunset = new THREE.DirectionalLight('#ffb070', 0.9);
-    sunset.position.set(-400, 120, 40); sunset.target.position.set(0, 0, 20);
-    root.add(sunset, sunset.target);
-    // lampada ad arco, LED viola dietro la TV, luce del bar
-    const lamp = new THREE.PointLight('#ffd7a0', 2.2, 260, 1); lamp.position.set(42, 96, 110); root.add(lamp);
-    const led = new THREE.PointLight('#8c5aff', 1.6, 200, 1); led.position.set(0, 66, -160); root.add(led);
-    const barL = new THREE.PointLight('#ffb36b', 1.4, 180, 1); barL.position.set(175, 90, 0); root.add(barL);
+    const fill = new THREE.DirectionalLight('#dfeaff', 0.8);
+    fill.position.set(300, 200, -200); fill.target.position.set(0, 0, 0);
+    root.add(fill, fill.target);
+    const barL = new THREE.PointLight('#ffc27a', 1.2, 200, 1); barL.position.set(170, 90, 0); root.add(barL);
   }
 
   // ombre: i mobili le proiettano, pavimento e pista le ricevono (calcolate una volta sola)
+  function finalize() {
   root.traverse((o) => {
     if (!o.isMesh) return;
     if (o.userData.noShadow) return;
@@ -838,11 +820,15 @@ export function buildMancave(root, track) {
       m.envMapIntensity = m.metalness > 0.5 ? 1 : m.transparent ? 0.9 : 0.35;
     }
   });
+  }
+  finalize();
+  // i modelli arrivano dopo: quando ci sono tutti ricalcolo le ombre
+  track.ready = Promise.all(pending).then(() => { finalize(); if (root.userData.refresh) root.userData.refresh(); });
 
-  root.userData.fog = new THREE.Fog('#2a221c', 520, 1400);
-  root.userData.background = new THREE.Color('#2a221c');
+  root.userData.fog = new THREE.Fog('#f7dfa6', 700, 1600);
+  root.userData.background = new THREE.Color('#f7dfa6');
   root.userData.toneMapping = THREE.ACESFilmicToneMapping;
-  root.userData.exposure = 0.9;
+  root.userData.exposure = 1.05;
   root.userData.makeEnv = makeEnv;
 }
 
@@ -851,17 +837,17 @@ function makeEnv(renderer) {
   const pm = new THREE.PMREMGenerator(renderer);
   const sc = new THREE.Scene();
   const room = new THREE.Mesh(new THREE.BoxGeometry(100, 40, 100), [
-    new THREE.MeshBasicMaterial({ color: '#7a5c48', side: THREE.BackSide }),   // +x bar
-    new THREE.MeshBasicMaterial({ color: '#c77a4a', side: THREE.BackSide }),   // -x finestra
-    new THREE.MeshBasicMaterial({ color: '#d9cbb8', side: THREE.BackSide }),   // soffitto
-    new THREE.MeshBasicMaterial({ color: '#4a3424', side: THREE.BackSide }),   // pavimento
-    new THREE.MeshBasicMaterial({ color: '#6b5a50', side: THREE.BackSide }),   // nord
-    new THREE.MeshBasicMaterial({ color: '#40365a', side: THREE.BackSide }),   // sud (LED)
+    new THREE.MeshBasicMaterial({ color: '#c9a77a', side: THREE.BackSide }),   // +x bar
+    new THREE.MeshBasicMaterial({ color: '#bfe3ff', side: THREE.BackSide }),   // -x finestra
+    new THREE.MeshBasicMaterial({ color: '#fbf6ec', side: THREE.BackSide }),   // soffitto
+    new THREE.MeshBasicMaterial({ color: '#a8743f', side: THREE.BackSide }),   // pavimento
+    new THREE.MeshBasicMaterial({ color: '#f2d9a0', side: THREE.BackSide }),   // nord
+    new THREE.MeshBasicMaterial({ color: '#2f6fb3', side: THREE.BackSide }),   // sud
   ]);
   sc.add(room);
   const panel = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 2.8, 2.5) }));
   panel.rotation.x = Math.PI / 2; panel.position.y = 19.5; sc.add(panel);
-  const win = new THREE.Mesh(new THREE.PlaneGeometry(30, 18), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.5, 1.4, 0.7) }));
+  const win = new THREE.Mesh(new THREE.PlaneGeometry(30, 18), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.8, 2.2, 2.6) }));
   win.rotation.y = Math.PI / 2; win.position.x = -49.5; sc.add(win);
   const rt = pm.fromScene(sc, 0.03);
   pm.dispose();

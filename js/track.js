@@ -8,6 +8,7 @@ export const TRACK_LIST = [
   { id: 'mancave', name: 'La Mancave' },
   { id: 'mall', name: 'Centro commerciale' },
   { id: 'hot', name: 'Pista Hot Wheels' },
+  { id: 'garden', name: 'Giardino' },
 ];
 const PORTALS_PROVA = [0.18, 0.47, 0.76];
 const PIT_PROVA = 0.56;
@@ -39,6 +40,7 @@ export function buildTrack(id = 'prova', step = 1.5) {
   if (id === 'mancave') return buildMancave(step);
   if (id === 'mall') return buildMall(step);
   if (id === 'hot') return buildHot(step);
+  if (id === 'garden') return buildGarden(step);
   const n = CONTROL.length;
   const C = CONTROL.map(([x, z]) => [x * SCALE, z * SCALE]);
   const dense = [];
@@ -229,6 +231,52 @@ function buildCtrl(CTRL, step) {
   };
 }
 
+// ------------------------------------------------------------------ Giardino (kart giocattolo nell'erba)
+// zone: patio (pietre), grass (prato), flowers (aiuola con i gambi dei fiori in mezzo alla pista), ramp, bridge (ponte di legno
+// sullo stagno, finisce con un salto), mud (fango: si scivola), sprinkler (l'irrigatore che spruzza)
+const GARDEN = [
+  [-60, -140, 0, 'patio'], [40, -142, 0, 'patio'], [110, -130, 0, 'grass'],
+  [160, -95, 0, 'grass'], [172, -40, 0, 'flowers'], [152, 10, 0, 'flowers'], [174, 58, 0, 'flowers'], [150, 108, 0, 'grass'],
+  [100, 132, 0, 'grass'], [64, 112, 0, 'ramp'], [32, 100, 8, 'bridge'], [-18, 98, 8, 'bridge'], [-44, 101, 8, 'bridge'], [-62, 108, 0, 'grass', true],
+  [-100, 128, 0, 'grass'], [-150, 120, 0, 'grass'], [-172, 80, 0, 'mud'], [-160, 30, 0, 'grass'], [-130, -8, 0, 'grass'],
+  [-80, 0, 0, 'grass'], [-35, 28, 0, 'sprinkler'], [20, 30, 0, 'grass'], [52, -15, 0, 'grass'], [20, -62, 0, 'grass'],
+  [-40, -72, 0, 'grass'], [-110, -88, 0, 'grass'], [-150, -122, 0, 'grass'], [-122, -146, 0, 'patio'],
+];
+function buildGarden(step) {
+  const t = buildCtrl(GARDEN, step);
+  const { sNear, length } = t;
+  const tr = {
+    ...t.track, id: 'garden', name: 'Giardino',
+    portalFractions: [sNear(120, -128) / length, sNear(-150, 120) / length, sNear(30, -50) / length],
+    pitFraction: sNear(-140, -15) / length,
+    marks: { sprinkler: sNear(-35, 28), snail: sNear(100, 132), pond: { x: 8, z: 100 } },
+  };
+  // gambi dei fiori in mezzo alla pista (nell'aiuola): ostacoli solidi, alternati a destra e a sinistra
+  const stems = [];
+  let side = 1;
+  for (let i = 0; i < tr.count; i += Math.round(40 / tr.ds)) {
+    if (tr.zone[i] !== 'flowers') continue;
+    const p = tr.pts[i]; side = -side;
+    stems.push({ x: p.x + p.rx * side * 5.5, z: p.z + p.rz * side * 5.5, r: 1.5, h: 90 });
+  }
+  tr.stems = stems;
+  tr.solid = circleSolid(stems);
+  return tr;
+}
+// griglia dei solidi fatta da cerchi (gambi, pali...): stesso formato di quella dei mobili
+export function circleSolid(list, cs = 1) {
+  const x0 = -260, z0 = -260, nx = 520, nz = 520, cells = new Map();
+  for (const c of list) {
+    for (let j = Math.floor((c.z - c.r - z0) / cs); j <= Math.floor((c.z + c.r - z0) / cs); j++)
+      for (let i = Math.floor((c.x - c.r - x0) / cs); i <= Math.floor((c.x + c.r - x0) / cs); i++) {
+        const cx = x0 + (i + 0.5) * cs, cz = z0 + (j + 0.5) * cs;
+        if (Math.hypot(cx - c.x, cz - c.z) > c.r + cs * 0.5) continue;
+        cells.set(j * nx + i, [c.y0 || 0, c.h || 60]);
+      }
+  }
+  return { x0, z0, cs, nx, nz, cells };
+}
+
 // dove si vede davvero un kart che è nel giro della morte: { x, y, z, pitch } (o null fuori dal giro)
 // avanti: f(u) = R·sin(2πu) in più del rettilineo, su: R·(1 − cos 2πu); in cima si è a testa in giù
 export function loopPose(track, s, x, y, z) {
@@ -303,6 +351,7 @@ export function zoneAt(track, s) {
 // così ogni schermo li vede uguali senza mandarli in rete
 export function obstaclesAt(track, t) {
   if (track.id === 'mall') return mallObstacles(track, t);
+  if (track.id === 'garden') return gardenObstacles(track, t);
   if (track.id !== 'mancave') return [];
   const out = [];
   const at = (s, lat, y = 0) => {
@@ -335,6 +384,19 @@ function mallObstacles(track, t) {
   }
   // porte chiuse: tre "pezzi" che coprono la strada
   if (doorOpen(t) < 0.35) for (const lat of [-6, 0, 6]) out.push({ kind: 'door', r: 3.2, ...at(track.marks.door, lat) });
+  return out;
+}
+
+// Giardino: l'irrigatore spruzza avanti e indietro attraverso la pista, la lumaca la attraversa piano
+function gardenObstacles(track, t) {
+  const at = (s, lat) => {
+    const p = track.pts[Math.floor(((s % track.length) + track.length) % track.length / track.ds) % track.count];
+    return { x: p.x + p.rx * lat, z: p.z + p.rz * lat, y: 0, yaw: Math.atan2(p.tx, p.tz) };
+  };
+  const out = [];
+  out.push({ kind: 'spray', r: 4, ...at(track.marks.sprinkler, Math.sin(t * Math.PI * 2 / 6) * 10) });
+  const ph = ((t % 24) + 24) % 24;
+  if (ph < 14) { const c = at(track.marks.snail, -24 + 48 * (ph / 14)); out.push({ kind: 'snail', r: 4.2, ...c, yaw: c.yaw + Math.PI / 2 }); }
   return out;
 }
 

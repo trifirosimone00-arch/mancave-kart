@@ -6,6 +6,7 @@ import { LAMPO, LAMPO_MAX } from './minigames.js';
 import { buildMancave } from './render-mancave.js';
 import { buildMall } from './render-mall.js';
 import { buildHot } from './render-hot.js';
+import { buildGarden } from './render-garden.js';
 import { buildKartModel } from './kart-model.js';
 import { createCardFx } from './card-fx.js';
 import { createArenaView } from './arena-render.js';
@@ -404,6 +405,7 @@ function buildWorld(root, track, night = false) {
   if (track.id === 'mancave') buildMancave(root, track, { night });
   else if (track.id === 'mall') buildMall(root, track, { night });
   else if (track.id === 'hot') buildHot(root, track, { night });
+  else if (track.id === 'garden') buildGarden(root, track, { night });
   else buildProva(root, track, night);
   buildCommon(root, track);
 }

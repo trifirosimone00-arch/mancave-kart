@@ -197,7 +197,7 @@ function move(track, k, dt, fx, fz) {
   k.prevS = k.s; k.idx = loc.idx; k.s = loc.s; k.lat = loc.lat;
 
   const zone = zoneAt(track, k.s);
-  k.ice = zone === 'spill';
+  k.ice = zone === 'spill' || zone === 'mud';
   // spinta turbo della pista Hot Wheels
   if (k.zoneBoostCD > 0) k.zoneBoostCD -= dt;
   if (zone === 'boost' && !(k.zoneBoostCD > 0) && !k.air) { giveBoost(k, 1.1, 'orange'); k.zoneBoostCD = 1.5; }

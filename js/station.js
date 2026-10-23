@@ -751,7 +751,7 @@ function hitObstacles(mine, now) {
       if (k.shieldT > 0) break;
       k.spinT = Math.max(k.spinT, 0.9); k.speed *= 0.5;
       vibrate(k.slot, [120]);
-      addNote(k.slot, o.kind === 'cat' ? 'MIAO! Il gatto!' : o.kind === 'door' ? 'Porta chiusa!' : o.kind.startsWith('cart') ? 'Carrello!' : 'L\'aspirapolvere!', 'bad');
+      addNote(k.slot, o.kind === 'cat' ? 'MIAO! Il gatto!' : o.kind === 'door' ? 'Porta chiusa!' : o.kind.startsWith('cart') ? 'Carrello!' : o.kind === 'spray' ? 'Che doccia!' : o.kind === 'snail' ? 'La lumaca!' : 'L\'aspirapolvere!', 'bad');
       break;
     }
   }

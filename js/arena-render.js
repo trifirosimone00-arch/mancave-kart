@@ -281,7 +281,7 @@ export function createArenaView(scene, cfx) {
       case 'pball': { const m = new THREE.Mesh(new THREE.SphereGeometry(o.r, 20, 16), std(o.c || '#fff', { roughness: 0.12, metalness: 0.1 })); m.castShadow = true; return m; }
       case 'beer': return makeBeer();
       case 'chip': { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 8), std(o.gold ? '#ffd700' : '#f6c453', { roughness: 0.4, metalness: o.gold ? 0.7 : 0, emissive: o.gold ? '#6b4a00' : '#000' })); m.scale.set(1.6, 0.35, 1.1); return m; }
-      case 'coin': { const m = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.3, 24), std('#ffcc00', { metalness: 0.85, roughness: 0.2, emissive: '#5a3c00' })); m.rotation.x = Math.PI / 2; const g = new THREE.Group(); g.add(m); return g; }
+      case 'coin': { const m = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 0.4, 28), std('#ffd23f', { metalness: 0.6, roughness: 0.25, emissive: '#8a6000' })); m.rotation.x = Math.PI / 2; const g = new THREE.Group(); g.add(m); return g; }
     }
     return new THREE.Group();
   }

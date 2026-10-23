@@ -6,7 +6,7 @@ import { OX, OZ, HW, HD, POCKETS, GOAL_HALF, TILE, TNX, TNZ, slalomCans, slalomG
 const FLOOR = {
   parcheggio: ['#3b3f4a', '#f2f2f2'], slalom: ['#5fae4f', '#ffffff'], bowling: ['#d8a35d', '#a86c2c'], collina: ['#6cbf5a', '#fff2b0'],
   autoscontro: ['#2d3a6b', '#ffd400'], patata: ['#c96b3a', '#ffcf8a'], bandiera: ['#4caf6a', '#ffffff'], calcetto: ['#2e9a3c', '#ffffff'],
-  aspirapolvere: ['#c9a27a', '#a57e57'], pavimento: ['#333', '#333'], birra: ['#b98654', '#8d5c33'], raccogli: ['#e45b3d', '#ffd36b'],
+  aspirapolvere: ['#c9a27a', '#a57e57'], pavimento: ['#333', '#333'], birra: ['#b98654', '#8d5c33'], raccogli: ['#b8322a', '#ffd36b'],
   gatto: ['#9fc3e8', '#ffffff'], biliardo: ['#147a4a', '#0d5c37'], monete: ['#4b7bd8', '#ffd400'], battaglia: ['#7a3fb0', '#ff8ad8'],
 };
 
@@ -280,7 +280,7 @@ export function createArenaView(scene, cfx) {
       case 'ball': { const m = new THREE.Mesh(new THREE.SphereGeometry(o.r, 24, 18), std('#fff', { map: soccer, roughness: 0.4 })); m.castShadow = true; return m; }
       case 'pball': { const m = new THREE.Mesh(new THREE.SphereGeometry(o.r, 20, 16), std(o.c || '#fff', { roughness: 0.12, metalness: 0.1 })); m.castShadow = true; return m; }
       case 'beer': return makeBeer();
-      case 'chip': { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 8), std(o.gold ? '#ffd700' : '#f6c453', { roughness: 0.4, metalness: o.gold ? 0.7 : 0, emissive: o.gold ? '#6b4a00' : '#000' })); m.scale.set(1.6, 0.35, 1.1); return m; }
+      case 'chip': { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 8), std(o.gold ? '#ffd700' : '#ffc21a', { roughness: 0.35, metalness: o.gold ? 0.7 : 0, emissive: o.gold ? '#8a6000' : '#5a3a00' })); m.scale.set(1.6, 0.35, 1.1); return m; }
       case 'coin': { const m = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 0.4, 28), std('#ffd23f', { metalness: 0.6, roughness: 0.25, emissive: '#8a6000' })); m.rotation.x = Math.PI / 2; const g = new THREE.Group(); g.add(m); return g; }
     }
     return new THREE.Group();

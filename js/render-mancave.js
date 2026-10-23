@@ -545,7 +545,7 @@ export function buildMancave(root, track, opts = {}) {
     } });
     K('speaker', { x: -105, z: z0 + 14, s: 110, ry: 0.15 });
     K('speaker', { x: 105, z: z0 + 14, s: 110, ry: -0.15 });
-    K('pottedPlant', { x: -150, z: z0 + 18, s: 190 });
+    K('pottedPlant', { x: -172, z: z0 + 14, s: 190 });   // nell'angolo: le foglie non devono finire sulla strada
     K('radio', { x: 55, z: z0 + 18, y: 30, s: 70, ry: -0.3 });
     K('books', { x: -55, z: z0 + 18, y: 30, s: 90, ry: 0.2 });
     // luce LED dietro la TV
@@ -638,7 +638,7 @@ export function buildMancave(root, track, opts = {}) {
 
   // ---------------------------------------------------------------- tavolo da pranzo (ovest): la pista ci passa sotto
   {
-    const x0 = -198, x1 = -138, z0 = -130, z1 = -50, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, top = 38;
+    const x0 = -198, x1 = -138, z0 = -112, z1 = -50, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, top = 38;   // z0 -112: la gamba d'angolo resta fuori dalla strada
     K('table', { x: cx, z: cz, w: z1 - z0, h: top, d: x1 - x0, ry: Math.PI / 2 });
     for (const z of [-72, -102]) if (free(-122, z, 12)) K('chair', { x: -122, z, h: 48, ry: -Math.PI / 2 });
     K('cupcake', { x: cx - 8, z: cz + 14, y: top, s: 40 });

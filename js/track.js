@@ -9,6 +9,7 @@ export const TRACK_LIST = [
   { id: 'mall', name: 'Centro commerciale' },
   { id: 'hot', name: 'Pista Hot Wheels' },
   { id: 'garden', name: 'Giardino' },
+  { id: 'roma', name: 'Roma' },
 ];
 const PORTALS_PROVA = [0.18, 0.47, 0.76];
 const PIT_PROVA = 0.56;
@@ -41,6 +42,7 @@ export function buildTrack(id = 'prova', step = 1.5) {
   if (id === 'mall') return buildMall(step);
   if (id === 'hot') return buildHot(step);
   if (id === 'garden') return buildGarden(step);
+  if (id === 'roma') return buildRoma(step);
   const n = CONTROL.length;
   const C = CONTROL.map(([x, z]) => [x * SCALE, z * SCALE]);
   const dense = [];
@@ -263,6 +265,30 @@ function buildGarden(step) {
   tr.solid = circleSolid(stems);
   return tr;
 }
+// ------------------------------------------------------------------ Roma: via dei Fori Imperiali, Tevere coi ponti, San Pietro sullo sfondo,
+// Fontana di Trevi e giro intorno al Colosseo. Zone: street (sampietrini), bridge (ponte sul Tevere, a schiena d'asino),
+// trevi (la piazza della fontana), colosseo (intorno al Colosseo)
+const ROMA = [
+  [-160, -150, 0, 'street'], [-60, -152, 0, 'street'], [40, -150, 0, 'street'],
+  [100, -132, 0, 'street'], [126, -92, 0, 'street'], [130, -52, 0, 'street'],
+  [152, -32, 2, 'bridge'], [182, -28, 5, 'bridge'], [212, -30, 2, 'bridge'], [236, -18, 0, 'street'],
+  [244, 30, 0, 'street'], [238, 80, 0, 'street'],
+  [212, 100, 2, 'bridge'], [182, 104, 5, 'bridge'], [152, 102, 2, 'bridge'], [126, 112, 0, 'street'],
+  [88, 134, 0, 'trevi'], [40, 142, 0, 'trevi'], [0, 128, 0, 'street'],
+  [-40, 86, 0, 'colosseo'], [15, 66, 0, 'colosseo'], [38, 12, 0, 'colosseo'], [15, -44, 0, 'colosseo'], [-40, -63, 0, 'colosseo'],
+  [-95, -46, 0, 'colosseo'], [-116, 8, 0, 'street'], [-150, -38, 0, 'street'], [-176, -98, 0, 'street'], [-170, -138, 0, 'street'],
+];
+function buildRoma(step) {
+  const t = buildCtrl(ROMA, step);
+  const { sNear, length } = t;
+  return {
+    ...t.track, id: 'roma', name: 'Roma',
+    portalFractions: [sNear(126, -90) / length, sNear(240, 30) / length, sNear(15, -44) / length],
+    pitFraction: sNear(60, 140) / length,
+    marks: { vespa: sNear(-60, -152), bus: sNear(-10, 115), vespa2: sNear(244, 30), colosseo: { x: -40, z: 11 }, trevi: { x: 40, z: 170 } },
+  };
+}
+
 // griglia dei solidi fatta da cerchi (gambi, pali...): stesso formato di quella dei mobili
 export function circleSolid(list, cs = 1) {
   const x0 = -260, z0 = -260, nx = 520, nz = 520, cells = new Map();
@@ -352,6 +378,7 @@ export function zoneAt(track, s) {
 export function obstaclesAt(track, t) {
   if (track.id === 'mall') return mallObstacles(track, t);
   if (track.id === 'garden') return gardenObstacles(track, t);
+  if (track.id === 'roma') return romaObstacles(track, t);
   if (track.id !== 'mancave') return [];
   const out = [];
   const at = (s, lat, y = 0) => {
@@ -397,6 +424,20 @@ function gardenObstacles(track, t) {
   out.push({ kind: 'spray', r: 4, ...at(track.marks.sprinkler, Math.sin(t * Math.PI * 2 / 6) * 10) });
   const ph = ((t % 24) + 24) % 24;
   if (ph < 14) { const c = at(track.marks.snail, -24 + 48 * (ph / 14)); out.push({ kind: 'snail', r: 4.2, ...c, yaw: c.yaw + Math.PI / 2 }); }
+  return out;
+}
+
+// Roma: traffico che attraversa la pista (due Vespe e un autobus)
+function romaObstacles(track, t) {
+  const out = [];
+  const at = (s, lat) => {
+    const p = track.pts[Math.floor(((s % track.length) + track.length) % track.length / track.ds) % track.count];
+    return { x: p.x + p.rx * lat, z: p.z + p.rz * lat, y: 0, yaw: Math.atan2(p.tx, p.tz) };
+  };
+  for (const [mk, per, off, dur, r] of [['vespa', 8, 0, 2.6, 3.4], ['vespa2', 10, 5, 2.6, 3.4], ['bus', 15, 3, 6, 7]]) {
+    const ph = (((t + off) % per) + per) % per;
+    if (ph < dur) { const dir = Math.floor((t + off) / per) % 2 ? 1 : -1; const c = at(track.marks[mk], dir * (-34 + 68 * (ph / dur))); out.push({ kind: mk, r, ...c, yaw: c.yaw + (dir > 0 ? Math.PI / 2 : -Math.PI / 2) }); }
+  }
   return out;
 }
 

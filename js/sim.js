@@ -181,7 +181,7 @@ function move(track, k, dt, fx, fz) {
   k.prevS = k.s; k.idx = loc.idx; k.s = loc.s; k.lat = loc.lat;
 
   const zone = zoneAt(track, k.s);
-  k.ice = zone === 'fridge';
+  k.ice = zone === 'spill';
   // tavolo senza bordi: se esci, cadi e ti rimettono in pista (perdi qualche secondo)
   if (zone === 'table') {
     if (Math.abs(k.lat) > track.halfWidth + 3.5) {

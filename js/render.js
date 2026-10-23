@@ -1,6 +1,6 @@
 // Grafica 3D: pista di prova, kart, telecamere per riquadro, HUD stile Wii.
 import * as THREE from 'three';
-import { groundHeight, RAMP_LENGTH, obstaclesAt } from './track.js';
+import { groundHeight, RAMP_LENGTH, obstaclesAt, locate } from './track.js';
 import { MT_BLUE, MT_ORANGE } from './sim.js';
 import { LAMPO, LAMPO_MAX } from './minigames.js';
 import { buildMancave } from './render-mancave.js';
@@ -388,7 +388,7 @@ function buildCommon(scene, track) {
 }
 
 function buildWorld(root, track) {
-  if (track.id === 'mancave') buildMancave(root, track, canvasTex);
+  if (track.id === 'mancave') buildMancave(root, track);
   else buildProva(root, track);
   buildCommon(root, track);
 }
@@ -502,11 +502,26 @@ export function createRenderer(canvas, hudRoot, track) {
     if (perf.fastFor >= 8 && prStep > 0) { prStep--; renderer.setPixelRatio(MAX_PR * STEPS[prStep]); perf.fastFor = 0; }
   }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // ombre statiche: si calcolano una volta quando si costruisce la pista
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;
   const scene = new THREE.Scene();
   let world = new THREE.Group();
   buildWorld(world, track);
   scene.add(world);
-  scene.fog = world.userData.fog || null;
+  applyLook();
+  // aspetto della pista: nebbia, tone mapping, riflessi, sfondo
+  function applyLook() {
+    const u = world.userData;
+    scene.fog = u.fog || null;
+    scene.background = u.background || null;
+    renderer.toneMapping = u.toneMapping || THREE.NoToneMapping;
+    renderer.toneMappingExposure = u.exposure || 1;
+    if (scene.environment) { scene.environment.dispose(); scene.environment = null; }
+    if (u.makeEnv) scene.environment = u.makeEnv(renderer);
+    renderer.shadowMap.needsUpdate = true;
+  }
   // cambio pista: butto via il mondo vecchio e costruisco il nuovo
   function setTrack(t) {
     scene.remove(world);
@@ -519,7 +534,7 @@ export function createRenderer(canvas, hudRoot, track) {
     world = new THREE.Group();
     buildWorld(world, track);
     scene.add(world);
-    scene.fog = world.userData.fog || null;
+    applyLook();
     bounds = computeBounds();
     views.forEach(v => { v.mapBase = null; v.init = false; v.init2 = false; });
     for (const kind of Object.keys(pool)) { for (const m of pool[kind].values()) scene.remove(m); pool[kind].clear(); }
@@ -648,6 +663,13 @@ export function createRenderer(canvas, hudRoot, track) {
     g.add(body, stripe, cab, red, blue);
     g.userData.lights = [red, blue];
     return g;
+  }
+  // altezza del terreno sotto un oggetto (sulle piste con mobili da scalare)
+  function groundAt(o, x, z) {
+    if (!track.hs) return 0;
+    const l = locate(track, x, z, o.userData.gIdx ?? -1);
+    o.userData.gIdx = l.idx;
+    return groundHeight(track, l.s, l.lat);
   }
   function syncPool(kind, list, make, place) {
     const seen = new Set();
@@ -827,13 +849,13 @@ export function createRenderer(canvas, hudRoot, track) {
       pm.glow.color.set(ready ? '#ffd400' : '#6b7080');
     });
     syncPool('oil', snap.hazards, () => { const o = new THREE.Mesh(oilGeo, oilMat); o.rotation.x = -Math.PI / 2; return o; },
-      (o, h) => o.position.set(h.x, 0.07, h.z));
+      (o, h) => o.position.set(h.x, groundAt(o, h.x, h.z) + 0.1, h.z));
     syncPool('missile', snap.missiles, (it) => (it.kind === 'police' ? makePolice() : makeMissile()), (o, m) => {
       if (m.kind === 'police') {
-        o.position.set(m.x, 0, m.z); o.rotation.y = m.yaw;
+        o.position.set(m.x, groundAt(o, m.x, m.z), m.z); o.rotation.y = m.yaw;
         const on = Math.sin(tsec * 18) > 0;
         o.userData.lights[0].visible = on; o.userData.lights[1].visible = !on;
-      } else { o.position.set(m.x, 1.1, m.z); o.rotation.y = m.yaw; }
+      } else { o.position.set(m.x, groundAt(o, m.x, m.z) + 1.1, m.z); o.rotation.y = m.yaw; }
     });
     if (feedEl) {
       const fs = (snap.feed || []).join('|');

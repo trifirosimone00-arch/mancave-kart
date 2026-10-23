@@ -105,17 +105,26 @@ export function buildTrack(id = 'prova', step = 1.5) {
 }
 
 // ------------------------------------------------------------------ La Mancave in miniatura
+// Scala: 1 unità ≈ 2 cm. Un kart è un giocattolo di 6 cm, i mobili sono enormi.
+// La stanza va da x -200 a 200 e da z -175 a 175 (8 x 7 metri).
 // [x, z, altezza, zona fino al punto dopo, salto?]
-// zone: rug (tappeto), books (rampa di libri), tv (mobile TV), floor (pavimento), sofa (divano),
-// arm (bracciolo), bar (bancone), fridge (frigo: si scivola), kitchen, chair, table (tavolo: senza bordi), foos (biliardino)
+// zone: floor (parquet), rug (tappeto), bar (lungo il bancone), spill (birra versata: si scivola),
+// under (sotto il divano), diner (sotto il tavolo da pranzo), ramp (asse che sale), table (tavolino: senza bordi),
+// pouf (il pouf dopo il salto)
 // salto = l'altezza cambia di colpo in questo punto (si vola giù)
 const MANCAVE = [
-  [0, 0, 0, 'rug'], [80, 0, 0, 'rug'], [140, 4, 0, 'books'], [200, 8, 12, 'tv'], [320, 8, 12, 'tv'], [380, 24, 12, 'tv'],
-  [405, 75, 0, 'floor'], [420, 130, 0, 'floor'], [425, 180, 10, 'sofa'], [425, 250, 10, 'sofa'], [425, 320, 10, 'arm'],
-  [420, 350, 13, 'arm'], [415, 368, 0, 'floor', true], [405, 420, 0, 'floor'], [370, 460, 0, 'floor'],
-  [310, 472, 0, 'bar'], [250, 474, 14, 'bar'], [130, 474, 14, 'bar'], [50, 470, 0, 'kitchen'], [-10, 458, 0, 'fridge'],
-  [-70, 440, 0, 'fridge'], [-110, 400, 0, 'kitchen'], [-130, 345, 0, 'chair'], [-135, 290, 12, 'table'], [-135, 200, 12, 'table'],
-  [-130, 152, 0, 'floor', true], [-115, 95, 0, 'foos'], [-90, 50, 0, 'foos'], [-50, 12, 0, 'rug'],
+  [20, -112, 0, 'floor'], [80, -110, 0, 'floor'], [118, -92, 0, 'floor'],
+  [138, -55, 0, 'bar'], [142, -10, 0, 'bar'], [142, 35, 0, 'floor'], [136, 75, 0, 'spill'],
+  [118, 108, 0, 'floor'], [85, 130, 0, 'floor'],
+  [45, 140, 0, 'under'], [0, 142, 0, 'under'], [-50, 142, 0, 'under'], [-90, 138, 0, 'floor'],
+  [-125, 122, 0, 'floor'], [-148, 92, 0, 'floor'],
+  [-137, 62, 0, 'floor'], [-153, 32, 0, 'floor'], [-139, 2, 0, 'floor'], [-157, -30, 0, 'diner'],
+  [-165, -70, 0, 'diner'], [-160, -110, 0, 'floor'], [-140, -138, 0, 'floor'], [-112, -136, 0, 'floor'],
+  [-98, -105, 0, 'floor'], [-98, -60, 0, 'ramp'], [-96, -28, 7, 'ramp'],
+  [-82, 22, 18, 'table'], [-72, 48, 18, 'table'], [-48, 62, 18, 'table'], [-12, 60, 18, 'table'],
+  [14, 54, 10, 'pouf', true], [30, 46, 10, 'pouf'], [55, 30, 4, 'rug'],
+  [78, 8, 0, 'rug'], [72, -22, 0, 'floor'], [45, -38, 0, 'floor'], [10, -38, 0, 'floor'], [-25, -48, 0, 'floor'],
+  [-50, -68, 0, 'floor'], [-62, -90, 0, 'floor'], [-40, -108, 0, 'floor'],
 ];
 const MANCAVE_SCALE = 1;
 
@@ -164,20 +173,20 @@ function buildMancave(step) {
     hs[i] = B[4] ? A[2] : A[2] + (B[2] - A[2]) * u;
     zone[i] = A[3];
     // piccole onde sui cuscini del divano
-    if (A[3] === 'sofa' && B[3] !== 'floor') hs[i] += Math.sin(pts[i].s * 0.22) * 0.45 * Math.min(1, u * 4, (1 - u) * 4);
   }
   for (let i = 1; i < count; i++) if (hs[i] < hs[i - 1] - 3) step0[i] = 1;
   // punti notevoli (come distanza dal via)
   const sAt = (cpIdx, frac = 0) => { let best = 0, bd = Infinity; for (let i = 0; i < count; i++) { const d = Math.abs(pts[i].cp - (cpIdx + frac)); if (d < bd) { bd = d; best = i; } } return pts[best].s; };
-  const portalFractions = [sAt(1, 0.3) / length, sAt(9, 0.2) / length, sAt(21, 0.5) / length];
-  const pitFraction = sAt(16, 0.55) / length;              // sul bancone del bar
+  const sNear = (x, z) => { let best = 0, bd = Infinity; for (let i = 0; i < count; i++) { const d = (pts[i].x - x) ** 2 + (pts[i].z - z) ** 2; if (d < bd) { bd = d; best = i; } } return pts[best].s; };
+  const portalFractions = [sNear(90, -106) / length, sNear(-140, 110) / length, sNear(25, -38) / length];
+  const pitFraction = sNear(141, -20) / length;            // lungo il bancone del bar
   return {
     id: 'mancave', name: 'La Mancave',
     pts, count, length, ds, hs, zone, step: step0,
     rampStartS: -1e9, rampEndS: -1e9,
     halfWidth: 8.5, wall: 13.5,
     portalFractions, pitFraction,
-    marks: { vacuum: sAt(1, 0.75), cat: sAt(19, 0.3), sink: sAt(21, 0.1), bar: sAt(16, 0.5), tv: sAt(4, 0), table: sAt(23, 0.5), foos: sAt(26, 0.5), sofa: sAt(9, 0) },
+    marks: { vacuum: sNear(-5, -42), cat: sNear(-146, 48), bar: sNear(141, -20), spill: sNear(132, 90) },
   };
 }
 
@@ -195,12 +204,12 @@ export function obstaclesAt(track, t) {
     const p = track.pts[Math.floor(s / track.ds) % track.count];
     return { x: p.x + p.rx * lat, z: p.z + p.rz * lat, y, yaw: Math.atan2(p.tx, p.tz) };
   };
-  // aspirapolvere: va avanti e indietro attraverso la pista sul tappeto
-  const v = at(track.marks.vacuum, Math.sin(t * Math.PI * 2 / 9) * 12);
-  out.push({ kind: 'vacuum', r: 2.2, ...v });
-  // gatto: ogni 14 secondi attraversa la cucina
+  // aspirapolvere robot: va avanti e indietro attraverso la pista nel rettilineo centrale
+  const v = at(track.marks.vacuum, Math.sin(t * Math.PI * 2 / 10) * 9);
+  out.push({ kind: 'vacuum', r: 4.2, ...v });
+  // gatto: ogni 14 secondi attraversa la pista vicino al tavolo da pranzo
   const ph = ((t % 14) + 14) % 14;
-  if (ph < 4) { const c = at(track.marks.cat, -22 + 44 * (ph / 4)); out.push({ kind: 'cat', r: 1.8, ...c, yaw: c.yaw + Math.PI / 2 }); }
+  if (ph < 4.5) { const c = at(track.marks.cat, -30 + 60 * (ph / 4.5)); out.push({ kind: 'cat', r: 4, ...c, yaw: c.yaw + Math.PI / 2 }); }
   return out;
 }
 

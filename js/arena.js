@@ -389,14 +389,20 @@ export function kgStep(ka, ks, dt) {
       C.pt += dt;
       if (C.ph === 'rest' && C.pt > (ka.t < 3 ? 2 : 0.7)) {
         const tg = alive[Math.floor(rr(ka) * alive.length)];
-        if (tg) { C.ph = 'aim'; C.pt = 0; C.tx = tg.x + Math.sin(tg.yaw) * tg.speed * 0.9; C.tz = tg.z + Math.cos(tg.yaw) * tg.speed * 0.9; Object.assign(C, { tx: clampIn({ x: C.tx, z: C.tz }, 6).x, tz: clampIn({ x: C.tx, z: C.tz }, 6).z }); }
-      } else if (C.ph === 'aim' && C.pt > Math.max(0.8, 1.4 - ka.t * 0.012)) { C.ph = 'jump'; C.pt = 0; C.fx = C.x; C.fz = C.z; }
+        if (tg) { C.ph = 'aim'; C.pt = 0; C.who = tg.slot; C.tx = tg.x + Math.sin(tg.yaw) * tg.speed * 0.9; C.tz = tg.z + Math.cos(tg.yaw) * tg.speed * 0.9; Object.assign(C, { tx: clampIn({ x: C.tx, z: C.tz }, 6).x, tz: clampIn({ x: C.tx, z: C.tz }, 6).z }); }
+      } else if (C.ph === 'aim') {
+        // il gatto segue con lo sguardo la sua preda fino a un attimo prima di saltare
+        const aimT = Math.max(0.9, 1.5 - ka.t * 0.012);
+        const tg = alive.find(k => k.slot === C.who);
+        if (tg && C.pt < aimT - 0.3) { const p = clampIn({ x: tg.x + Math.sin(tg.yaw) * tg.speed * 0.55, z: tg.z + Math.cos(tg.yaw) * tg.speed * 0.55 }, 6); C.tx = p.x; C.tz = p.z; }
+        if (C.pt > aimT) { C.ph = 'jump'; C.pt = 0; C.fx = C.x; C.fz = C.z; }
+      }
       else if (C.ph === 'jump') {
-        const u = Math.min(1, C.pt / 0.55);
+        const u = Math.min(1, C.pt / 0.45);
         C.x = C.fx + (C.tx - C.fx) * u; C.z = C.fz + (C.tz - C.fz) * u;
         if (u >= 1) {
           C.ph = 'rest'; C.pt = 0; fx('pounce', C.x, C.z);
-          for (const k of alive) if (Math.hypot(k.x - C.x, k.z - C.z) < 7.5) { ka.sc[k.slot] -= 5; ka.stun[k.slot] = ka.t + 1.1; fx('scratch', k.x, k.z, k.slot); }
+          for (const k of alive) if (Math.hypot(k.x - C.x, k.z - C.z) < 8) { ka.sc[k.slot] -= 5; ka.stun[k.slot] = ka.t + 1.1; fx('scratch', k.x, k.z, k.slot); }
         }
       }
       break;

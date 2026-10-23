@@ -341,7 +341,7 @@ export function createArenaView(scene, cfx) {
     if (extra.cat) {
       const C = ka.cat;
       let y = 0;
-      if (C.ph === 'jump') { const u = Math.min(1, C.pt / 0.55); y = Math.sin(u * Math.PI) * 16; }
+      if (C.ph === 'jump') { const u = Math.min(1, C.pt / 0.45); y = Math.sin(u * Math.PI) * 14; }
       extra.cat.position.set(C.x, y, C.z);
       extra.cat.rotation.y = Math.atan2(C.tx - C.x, C.tz - C.z) || extra.cat.rotation.y;
       const aiming = C.ph === 'aim' || C.ph === 'jump';

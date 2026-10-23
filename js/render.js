@@ -4,6 +4,7 @@ import { groundHeight, RAMP_LENGTH, obstaclesAt, locate, solidAt } from './track
 import { MT_BLUE, MT_ORANGE, MAX_SPEED } from './sim.js';
 import { LAMPO, LAMPO_MAX } from './minigames.js';
 import { buildMancave } from './render-mancave.js';
+import { buildMall } from './render-mall.js';
 import { buildKartModel } from './kart-model.js';
 import { createCardFx } from './card-fx.js';
 import { createArenaView } from './arena-render.js';
@@ -400,6 +401,7 @@ function buildCommon(scene, track) {
 
 function buildWorld(root, track, night = false) {
   if (track.id === 'mancave') buildMancave(root, track, { night });
+  else if (track.id === 'mall') buildMall(root, track, { night });
   else buildProva(root, track, night);
   buildCommon(root, track);
 }
@@ -936,6 +938,7 @@ export function createRenderer(canvas, hudRoot, track) {
     // effetti delle carte (icone, esplosioni, teletrasporto...) e particelle
     if (snap.phase === 'race' || snap.phase === 'finish') cfx.cardEvents(snap, karts, (e) => onEvent(e));
     // aspirapolvere e gatto
+    if (track.animate) track.animate(snap.raceTime || tsec, tsec);
     if (track.obstacleMeshes) {
       const obs = obstaclesAt(track, snap.raceTime || tsec);
       for (const [kind, mesh] of Object.entries(track.obstacleMeshes)) {

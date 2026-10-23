@@ -1,4 +1,5 @@
 // Piloti guidati dal computer (CPU).
+import { doorOpen } from './track.js';
 import { CARDS } from './cards.js';
 import { kartBlocked, groundHeight, solidPush } from './track.js';
 
@@ -90,6 +91,15 @@ export function cpuInput(track, k, brain, dt, ctx) {
     if (!brain.drifting && Math.abs(bend) > 0.6 && Math.abs(ang) > 0.18 && k.speed > 20 && Math.abs(k.lat) < track.halfWidth - 2) brain.drifting = true;
     if (brain.drifting && (Math.abs(ang) < 0.05 || Math.abs(bend) < 0.2 || k.speed < 12 || Math.abs(k.lat) > track.halfWidth)) brain.drifting = false;
     input.drift = brain.drifting;
+  }
+
+  // porte automatiche (Centro commerciale): se arrivo quando sono chiuse rallento e aspetto
+  if (track.marks && track.marks.door != null && ctx.t != null && !k.air) {
+    const d = ((track.marks.door - k.s) % track.length + track.length) % track.length;
+    if (d > 2 && d < 45) {
+      const tta = d / Math.max(6, k.speed);
+      if (doorOpen(ctx.t + tta) < 0.4 || doorOpen(ctx.t + tta + 0.4) < 0.4) { if (k.speed > (d < 14 ? 1 : 8)) input.brake = true; input.drift = false; brain.drifting = false; brain.stuckT = 0; }
+    }
   }
 
   // acrobazia sui salti

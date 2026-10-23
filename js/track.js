@@ -6,6 +6,7 @@
 export const TRACK_LIST = [
   { id: 'prova', name: 'Pista di prova' },
   { id: 'mancave', name: 'La Mancave' },
+  { id: 'mall', name: 'Centro commerciale' },
 ];
 const PORTALS_PROVA = [0.18, 0.47, 0.76];
 const PIT_PROVA = 0.56;
@@ -35,6 +36,7 @@ function catmull(p0, p1, p2, p3, t) {
 export function buildTrack(id = 'prova', step = 1.5) {
   if (typeof id === 'number') { step = id; id = 'prova'; }
   if (id === 'mancave') return buildMancave(step);
+  if (id === 'mall') return buildMall(step);
   const n = CONTROL.length;
   const C = CONTROL.map(([x, z]) => [x * SCALE, z * SCALE]);
   const dense = [];
@@ -129,6 +131,19 @@ const MANCAVE = [
 const MANCAVE_SCALE = 1;
 
 function buildMancave(step) {
+  const t = buildCtrl(MANCAVE, step);
+  const { sNear, length } = t;
+  const portalFractions = [sNear(90, -106) / length, sNear(-140, 110) / length, sNear(25, -38) / length];
+  const pitFraction = sNear(141, -20) / length;            // lungo il bancone del bar
+  return {
+    ...t.track, id: 'mancave', name: 'La Mancave', portalFractions, pitFraction,
+    marks: { vacuum: sNear(-5, -42), cat: sNear(-146, 48), bar: sNear(141, -20), spill: sNear(132, 90) },
+  };
+}
+
+// pista da punti di controllo [x, z, altezza, zona, salto?] (Mancave, Centro commerciale...)
+function buildCtrl(CTRL, step) {
+  const MANCAVE = CTRL;
   const n = MANCAVE.length;
   const C = MANCAVE.map(([x, z]) => [x * MANCAVE_SCALE, z * MANCAVE_SCALE]);
   // curva liscia, ricordando da quale punto di controllo viene ogni campione
@@ -178,15 +193,34 @@ function buildMancave(step) {
   // punti notevoli (come distanza dal via)
   const sAt = (cpIdx, frac = 0) => { let best = 0, bd = Infinity; for (let i = 0; i < count; i++) { const d = Math.abs(pts[i].cp - (cpIdx + frac)); if (d < bd) { bd = d; best = i; } } return pts[best].s; };
   const sNear = (x, z) => { let best = 0, bd = Infinity; for (let i = 0; i < count; i++) { const d = (pts[i].x - x) ** 2 + (pts[i].z - z) ** 2; if (d < bd) { bd = d; best = i; } } return pts[best].s; };
-  const portalFractions = [sNear(90, -106) / length, sNear(-140, 110) / length, sNear(25, -38) / length];
-  const pitFraction = sNear(141, -20) / length;            // lungo il bancone del bar
   return {
-    id: 'mancave', name: 'La Mancave',
-    pts, count, length, ds, hs, zone, step: step0,
-    rampStartS: -1e9, rampEndS: -1e9,
-    halfWidth: 8.5, wall: 13.5,
-    portalFractions, pitFraction,
-    marks: { vacuum: sNear(-5, -42), cat: sNear(-146, 48), bar: sNear(141, -20), spill: sNear(132, 90) },
+    sNear, sAt, length,
+    track: { pts, count, length, ds, hs, zone, step: step0, rampStartS: -1e9, rampEndS: -1e9, halfWidth: 8.5, wall: 13.5 },
+  };
+}
+
+// ------------------------------------------------------------------ Centro commerciale (kart giocattolo, scala 1 unità ≈ 4 cm)
+// La "piazza" va da x -200 a 200 e da z -175 a 175. Zone: floor (pavimento lucido), piazza (intorno alla fontana),
+// esc (scala mobile che sale), gallery (balconata al primo piano), stage (pedana dell'auto in mostra, scende),
+// door (porte automatiche del supermercato), market (corsie del supermercato), spill (pavimento bagnato: si scivola)
+const MALL = [
+  [-40, -132, 0, 'floor'], [40, -134, 0, 'floor'], [110, -128, 0, 'floor'], [150, -108, 0, 'floor'],
+  [166, -70, 0, 'floor'], [164, -30, 0, 'floor'], [140, -10, 0, 'floor'],
+  [100, -32, 0, 'piazza'], [55, -58, 0, 'piazza'], [5, -54, 0, 'piazza'], [-30, -20, 0, 'piazza'], [-24, 30, 0, 'piazza'],
+  [15, 60, 0, 'piazza'], [70, 70, 0, 'floor'], [118, 76, 0, 'floor'], [152, 94, 0, 'floor'], [150, 118, 0, 'floor'],
+  [125, 130, 0, 'esc'], [55, 140, 34, 'gallery'], [0, 142, 34, 'gallery'], [-55, 141, 34, 'gallery'], [-96, 130, 34, 'gallery'],
+  [-120, 106, 16, 'stage', true], [-133, 80, 16, 'stage'], [-142, 50, 0, 'floor'],
+  [-150, 22, 0, 'door'], [-157, -8, 0, 'market'], [-160, -45, 0, 'spill'], [-158, -80, 0, 'market'],
+  [-142, -112, 0, 'floor'], [-100, -132, 0, 'floor'],
+];
+function buildMall(step) {
+  const t = buildCtrl(MALL, step);
+  const { sNear, length } = t;
+  return {
+    ...t.track, id: 'mall', name: 'Centro commerciale',
+    portalFractions: [sNear(100, -130) / length, sNear(-20, 40) / length, sNear(-158, -40) / length],
+    pitFraction: sNear(165, -40) / length,
+    marks: { door: sNear(-150, 22), cart1: sNear(-158, -75), cart2: sNear(40, -57), fountain: { x: 60, z: 6 } },
   };
 }
 
@@ -198,6 +232,7 @@ export function zoneAt(track, s) {
 // ostacoli che si muovono (aspirapolvere robot e gatto): dipendono solo dal tempo di gara,
 // così ogni schermo li vede uguali senza mandarli in rete
 export function obstaclesAt(track, t) {
+  if (track.id === 'mall') return mallObstacles(track, t);
   if (track.id !== 'mancave') return [];
   const out = [];
   const at = (s, lat, y = 0) => {
@@ -210,6 +245,26 @@ export function obstaclesAt(track, t) {
   // gatto: ogni 14 secondi attraversa la pista vicino al tavolo da pranzo
   const ph = ((t % 14) + 14) % 14;
   if (ph < 4.5) { const c = at(track.marks.cat, -30 + 60 * (ph / 4.5)); out.push({ kind: 'cat', r: 4, ...c, yaw: c.yaw + Math.PI / 2 }); }
+  return out;
+}
+
+// Centro commerciale: carrelli della spesa che attraversano la pista e porte automatiche del supermercato
+// (porte chiuse = ostacolo per tutta la larghezza: bisogna passare quando sono aperte)
+export const DOOR_CYCLE = 6, DOOR_OPEN = 3.8;
+export function doorOpen(t) { const ph = ((t % DOOR_CYCLE) + DOOR_CYCLE) % DOOR_CYCLE; return ph < DOOR_OPEN ? Math.min(1, ph / 0.5, (DOOR_OPEN - ph) / 0.5) : 0; }
+function mallObstacles(track, t) {
+  const out = [];
+  const at = (s, lat) => {
+    const p = track.pts[Math.floor(((s % track.length) + track.length) % track.length / track.ds) % track.count];
+    return { x: p.x + p.rx * lat, z: p.z + p.rz * lat, y: 0, yaw: Math.atan2(p.tx, p.tz) };
+  };
+  // carrelli: attraversano la pista ogni tanto (sfasati)
+  for (const [mk, per, off] of [['cart1', 9, 0], ['cart2', 11, 4]]) {
+    const ph = (((t + off) % per) + per) % per;
+    if (ph < 4) { const c = at(track.marks[mk], -30 + 60 * (ph / 4)); out.push({ kind: mk, r: 5, ...c, yaw: c.yaw + Math.PI / 2 }); }
+  }
+  // porte chiuse: tre "pezzi" che coprono la strada
+  if (doorOpen(t) < 0.35) for (const lat of [-6, 0, 6]) out.push({ kind: 'door', r: 3.2, ...at(track.marks.door, lat) });
   return out;
 }
 

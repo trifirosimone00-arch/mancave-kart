@@ -623,7 +623,7 @@ function cpuThink(countdownLeft) {
     if (!k) continue;
     l.brain.level = cpuLevel;
     l.input = cpuInput(track, k, l.brain, DT, {
-      phase: W.phase === 'finish' ? 'race' : W.phase, countdownLeft,
+      phase: W.phase === 'finish' ? 'race' : W.phase, countdownLeft, t: MASTER ? W.raceTime : raceClock().raceTime,
       hand: hands.get(l.slot),
       others: [...karts.values()].filter(q => q.slot !== l.slot),
       useCard: (i, to) => useCard(l.slot, i, to),
@@ -751,7 +751,7 @@ function hitObstacles(mine, now) {
       if (k.shieldT > 0) break;
       k.spinT = Math.max(k.spinT, 0.9); k.speed *= 0.5;
       vibrate(k.slot, [120]);
-      addNote(k.slot, o.kind === 'cat' ? 'MIAO! Il gatto!' : 'L\'aspirapolvere!', 'bad');
+      addNote(k.slot, o.kind === 'cat' ? 'MIAO! Il gatto!' : o.kind === 'door' ? 'Porta chiusa!' : o.kind.startsWith('cart') ? 'Carrello!' : 'L\'aspirapolvere!', 'bad');
       break;
     }
   }

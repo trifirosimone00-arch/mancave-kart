@@ -16,7 +16,7 @@ const RECOLOR = {
 };
 const KCACHE = new Map();
 let LOADER = null;
-function loadK(name) {
+export function loadK(name) {
   if (!KCACHE.has(name)) {
     LOADER = LOADER || new GLTFLoader();
     KCACHE.set(name, new Promise((res) => LOADER.load(`assets/kenney/${name}.glb`, (g) => {
@@ -37,14 +37,14 @@ function loadK(name) {
   return KCACHE.get(name);
 }
 
-function rng(seed) {
+export function rng(seed) {
   let s = seed >>> 0;
   return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
 }
 
 // ------------------------------------------------------------------ texture disegnate a codice
-function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
-function toTex(c, { srgb = true, repeat = null, aniso = 8 } = {}) {
+export function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+export function toTex(c, { srgb = true, repeat = null, aniso = 8 } = {}) {
   const t = new THREE.CanvasTexture(c);
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat[0], repeat[1]); }
@@ -52,7 +52,7 @@ function toTex(c, { srgb = true, repeat = null, aniso = 8 } = {}) {
   return t;
 }
 // rumore fine pixel per pixel (fibre, grana)
-function grain(g, w, h, amount, R, mono = true) {
+export function grain(g, w, h, amount, R, mono = true) {
   const d = g.getImageData(0, 0, w, h), a = d.data;
   for (let i = 0; i < a.length; i += 4) {
     const n = (R() - 0.5) * amount;
@@ -109,7 +109,7 @@ function parquetTex(R) {
   return { map: toTex(col, { repeat: [1, 1] }), bump: toTex(bump, { srgb: false, repeat: [1, 1] }) };
 }
 
-function fabricTex(base, R, { size = 256, weave = 0.18, knit = false } = {}) {
+export function fabricTex(base, R, { size = 256, weave = 0.18, knit = false } = {}) {
   const c = canvas(size, size), g = c.getContext('2d');
   g.fillStyle = base; g.fillRect(0, 0, size, size);
   if (knit) {
@@ -126,7 +126,7 @@ function fabricTex(base, R, { size = 256, weave = 0.18, knit = false } = {}) {
   return toTex(c, { repeat: [1, 1] });
 }
 
-function woodTex(light, dark, R, { w = 1024, h = 512, rings = 60 } = {}) {
+export function woodTex(light, dark, R, { w = 1024, h = 512, rings = 60 } = {}) {
   const c = canvas(w, h), g = c.getContext('2d');
   g.fillStyle = light; g.fillRect(0, 0, w, h);
   for (let k = 0; k < rings; k++) {
@@ -141,7 +141,7 @@ function woodTex(light, dark, R, { w = 1024, h = 512, rings = 60 } = {}) {
   return toTex(c, { repeat: [1, 1] });
 }
 
-function roadTex(R) {
+export function roadTex(R) {
   // un pezzo di pista giocattolo: 17 unità di larghezza, 34 di lunghezza
   const W = 256, Hh = 512;
   const c = canvas(W, Hh), g = c.getContext('2d');
@@ -260,7 +260,7 @@ function posterTex(kind) {
   return toTex(c);
 }
 
-function neonTex(text, color) {
+export function neonTex(text, color) {
   const c = canvas(1024, 256), g = c.getContext('2d');
   g.font = '700 150px "Brush Script MT", "Segoe Script", cursive'; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.shadowColor = color; g.shadowBlur = 40; g.fillStyle = color;
@@ -269,7 +269,7 @@ function neonTex(text, color) {
   return toTex(c);
 }
 
-function leafTex() {
+export function leafTex() {
   const c = canvas(256, 256), g = c.getContext('2d');
   g.fillStyle = '#2f6b34';
   g.beginPath(); g.moveTo(128, 250); g.bezierCurveTo(10, 200, 10, 40, 128, 6); g.bezierCurveTo(246, 40, 246, 200, 128, 250); g.fill();
@@ -284,7 +284,7 @@ function leafTex() {
 
 // ------------------------------------------------------------------ forme
 // scatola con spigoli arrotondati (cuscini, mobili): altezza lungo y, centrata
-function roundBox(w, h, d, r, seg = 3) {
+export function roundBox(w, h, d, r, seg = 3) {
   r = Math.max(0.05, Math.min(r, w / 2 - 0.05, d / 2 - 0.05, h / 2 - 0.05));
   const iw = w - 2 * r, id = d - 2 * r, s = new THREE.Shape();
   s.moveTo(-iw / 2, -id / 2); s.lineTo(iw / 2, -id / 2); s.lineTo(iw / 2, id / 2); s.lineTo(-iw / 2, id / 2); s.lineTo(-iw / 2, -id / 2);

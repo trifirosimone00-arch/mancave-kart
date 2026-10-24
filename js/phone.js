@@ -418,11 +418,19 @@ let handSig = '', picking = null, pickT = 0;
 function drawHand(s) {
   const h = s.hand || { cards: [], cd: 0 };
   const el = $('hand');
-  el.classList.toggle('cool', h.cd > 0);
+  el.classList.toggle('cool', h.cd > 0 && !h.inc);
+  // attacco in arrivo: scritta grande e Scudo che lampeggia
+  const inc = $('incoming');
+  if (inc) {
+    inc.classList.toggle('hidden', !h.inc);
+    if (h.inc) inc.innerHTML = `<b>${h.inc.name} IN ARRIVO!</b><span>${h.cards.some(c => c === 'shield' || c === 'supershield') ? 'Tocca lo SCUDO per pararlo!' : 'Non hai lo Scudo…'}</span>`;
+  }
+  el.classList.toggle('parry', !!h.inc);
   const hint = $('hand-hint');
   const full = h.cards.length >= HAND_SIZE;
   hint.classList.toggle('warn', h.cd > 0 || full);
-  if (h.cd > 0) hint.textContent = `Ricarica: ${Math.ceil(h.cd)} s`;
+  if (h.inc) hint.textContent = 'Attacco in arrivo: para con lo Scudo!';
+  else if (h.cd > 0) hint.textContent = `Ricarica: ${Math.ceil(h.cd)} s`;
   else if (full) hint.textContent = 'Mano piena: usa una carta per pescarne altre';
   else if (h.cards.length) hint.textContent = 'Tocca una carta per usarla';
   else hint.textContent = 'Passa sotto gli archi gialli per pescare carte';
@@ -477,7 +485,9 @@ function play(i) {
   const id = cardId(i);
   if (!id) return;
   const h = st.status.hand;
-  if (h.cd > 0) { if (navigator.vibrate) navigator.vibrate([10, 40, 10]); return; }
+  // contromossa: lo Scudo si può usare anche in ricarica quando sta arrivando un attacco
+  const parry = (id === 'shield' || id === 'supershield') && h.inc;
+  if (h.cd > 0 && !parry) { if (navigator.vibrate) navigator.vibrate([10, 40, 10]); return; }
   if (CARDS[id].target !== 'pick') { send2({ t: 'use', i }); return; }
   if (!(st.status.others || []).length) return;
   picking = { i, id };

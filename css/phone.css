@@ -256,3 +256,13 @@ html.rot #pad, html.rot #mg { inset: auto; top: 0; left: 0; width: 100vh; height
 /* minigioco col kart: niente carte, il messaggio in alto è il punteggio */
 body.kart-mg #hand, body.kart-mg .hand, body.kart-mg .cards, body.kart-mg #hand-hint { visibility: hidden; }
 body.kart-mg .pad-msg { font-size: 22px; color: #ffd400; }
+
+/* contromossa: attacco in arrivo */
+.incoming { position: fixed; left: 50%; top: 50px; transform: translateX(-50%); z-index: 30; background: #e8322b; color: #fff; border: 4px solid #fff;
+  border-radius: 16px; padding: 6px 20px; text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,.5); animation: inc-flash .35s infinite alternate; pointer-events: none; }
+.incoming b { display: block; font-size: 22px; font-weight: 900; letter-spacing: .02em; }
+.incoming span { display: block; font-size: 16px; font-weight: 800; }
+@keyframes inc-flash { to { background: #ff8a00; transform: translateX(-50%) scale(1.05); } }
+.hand.parry .card { opacity: .45; }
+.hand.parry .card[aria-label^="Scudo"], .hand.parry .card[aria-label^="Super Scudo"] { opacity: 1; animation: shield-pulse .3s infinite alternate; box-shadow: 0 0 0 4px #fff, 0 0 26px 8px #4fc3ff; }
+@keyframes shield-pulse { to { transform: scale(1.1); } }

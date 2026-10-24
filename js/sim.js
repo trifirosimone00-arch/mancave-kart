@@ -49,7 +49,9 @@ export function stepKart(track, k, input, dt, phase) {
   // Telefonata: finché non rifiuti la chiamata il kart va dritto
   if (k.callT > 0) { steer = 0; input = { ...input, steer: 0, drift: false }; }
   // Sbronzo: il kart sbanda un po' da solo
-  if (k.drunkT > 0) { k.drunkPh = (k.drunkPh || 0) + dt * 5.5; steer = Math.max(-1, Math.min(1, steer * 0.8 + Math.sin(k.drunkPh) * 0.32)); }
+  if (k.drunkT > 0) { k.drunkPh = (k.drunkPh || 0) + dt * 5.5; steer = Math.max(-1, Math.min(1, steer * 0.75 + Math.sin(k.drunkPh) * 0.45)); }
+  // dopo aver rifiutato la Telefonata resti ancora mezzo secondo senza sterzo
+  if (k.callAfterT > 0) { k.callAfterT -= dt; steer = 0; input = { ...input, steer: 0, drift: false }; }
 
   if (phase === 'countdown') {
     // turbo alla partenza: premi DERAPA nell'ultimo mezzo secondo
@@ -81,10 +83,11 @@ export function stepKart(track, k, input, dt, phase) {
 
   // ---- velocità ----
   let max = MAX_SPEED;
-  if (k.grass && !k.air) max *= GRASS_FACTOR;
+  // fuori dall'asfalto: sull'erba vera (pista di prova) si rallenta tanto, sui cordoli delle altre piste poco
+  if (k.grass && !k.air) max *= track.id === 'prova' ? GRASS_FACTOR : 0.88;
   if (k.speedMul) max *= k.speedMul;
-  if (k.miniT > 0) max *= 0.7;
-  if (k.slowT > 0) max *= 0.6;
+  if (k.miniT > 0) max *= 0.55;
+  if (k.slowT > 0) max *= 0.45;
   if (k.slowmoT > 0) max *= 0.5;                 // Telecomando: al rallentatore
   if (k.boostT > 0) { max *= BOOST_FACTOR; k.boostT -= dt; }
   if (input.brake && !k.air) {
@@ -142,7 +145,7 @@ export function stepKart(track, k, input, dt, phase) {
 
 // timer degli effetti; la bomba esplode a chi ce l'ha quando arriva a zero
 function tickEffects(k, dt) {
-  for (const f of ['shieldT', 'ghostT', 'invertT', 'stopT', 'miniT', 'slowT', 'fogT', 'drunkT', 'callT', 'slowmoT', 'copT', 'clampT', 'goldT']) if (k[f] > 0) k[f] = Math.max(0, k[f] - dt);
+  for (const f of ['shieldT', 'ghostT', 'invertT', 'stopT', 'miniT', 'slowT', 'fogT', 'drunkT', 'callT', 'slowmoT', 'copT', 'clampT', 'goldT', 'squashCD']) if (k[f] > 0) k[f] = Math.max(0, k[f] - dt);
   if (k.mirrorT > 0) { k.mirrorT -= dt; if (k.mirrorT <= 0) { k.mirrorT = 0; k.mirror = 0; } }
   if (k.bombT > 0) {
     k.bombT -= dt;
@@ -288,6 +291,12 @@ function shove(k, nx, nz, closing) {
 }
 const velOf = (k) => [Math.sin(k.yaw) * (k.speed || 0) + (k.shX || 0), Math.cos(k.yaw) * (k.speed || 0) + (k.shZ || 0)];
 
+// Mini: chi è piccolo e viene toccato da uno normale resta schiacciato (fermo 1 secondo)
+function squash(small, big) {
+  if (!(small.miniT > 0) || big.miniT > 0 || small.squashCD > 0 || small.shieldT > 0) return;
+  small.stopT = Math.max(small.stopT || 0, 1); small.squashCD = 2.5; small.events.push('squash');
+}
+
 export function collideKarts(karts) {
   for (let i = 0; i < karts.length; i++) {
     for (let j = i + 1; j < karts.length; j++) {
@@ -301,6 +310,7 @@ export function collideKarts(karts) {
         if (a.bumpCD <= 0) { a.events.push('hit'); a.bumpCD = 0.4; }
         if (b.bumpCD <= 0) { b.events.push('hit'); b.bumpCD = 0.4; }
         a.contacts.push(b.slot); b.contacts.push(a.slot);
+        squash(a, b); squash(b, a);
         const [avx, avz] = velOf(a), [bvx, bvz] = velOf(b);
         const closing = (avx - bvx) * nx + (avz - bvz) * nz;
         shove(a, -nx, -nz, closing); shove(b, nx, nz, closing);
@@ -326,6 +336,7 @@ export function collideWithRemote(local, remotes) {
         a.x += nx * push; a.z += nz * push;
         if (a.bumpCD <= 0) { a.events.push('hit'); a.bumpCD = 0.4; }
         a.contacts.push(b.slot);
+        squash(a, b);
         const [avx, avz] = velOf(a), [bvx, bvz] = velOf(b);
         const closing = (bvx - avx) * nx + (bvz - avz) * nz;
         shove(a, nx, nz, closing);

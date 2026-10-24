@@ -5,7 +5,7 @@
 // e scambia via internet solo le posizioni degli altri.
 import { buildTrack, obstaclesAt, TRACK_LIST } from './track.js';
 import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance, placeAt, giveBoost } from './sim.js';
-import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, PORTAL_COOLDOWN, PORTAL_FRACTIONS } from './cards.js';
+import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, STREAK, INCOMING, PORTAL_COOLDOWN, PORTAL_FRACTIONS } from './cards.js';
 import { createRenderer, kartThumb } from './render.js';
 import { PILOTS, freePilotColor } from './pilots.js';
 import { createScreenConfig, bindLayoutButtons, bindScreenBar } from './screen-ui.js';
@@ -47,7 +47,7 @@ const MODES = {
   singola: { label: 'Gara singola', short: 'Singola' },
   gp: { label: 'Gran Premio', short: 'Gran Premio', races: 4 },
   tempo: { label: 'Contro il tempo', short: 'Contro il tempo' },
-  torneo: { label: 'Torneo Mancave', short: 'Torneo', races: 3 },
+  torneo: { label: 'Torneo Mancave', short: 'Torneo', races: 3, elim: true },   // a eliminazione: le gare diventano piloti − 1
   battaglia: { label: 'Battaglia', short: 'Battaglia' },
 };
 const PTS = [10, 7, 5, 3, 2, 1];  // punti per posizione (Gran Premio, Torneo, classifica storica)
@@ -221,7 +221,7 @@ function onPhoneMsg(conn, msg) {
     case 'mg': if (W.pit && msg.s && typeof msg.s === 'object' && msg.s.id === W.pit.id && JSON.stringify(msg.s).length < 3000) l.mg = msg.s; break;
     case 'offer': pickOffer(l.slot, msg.pick); break;
     case 'pitskip': command(l.slot, { t: 'pitskip', id: msg.id, stage: msg.stage }); break;
-    case 'callend': { const k = karts.get(l.slot); if (k && k.callT > 0) { k.callT = 0; pushStatus(true); } break; }
+    case 'callend': { const k = karts.get(l.slot); if (k && k.callT > 0) { k.callT = 0; k.callAfterT = 0.5; pushStatus(true); } break; }
     case 'lampo': if (W.lampo && msg.id === W.lampo.id) toMaster({ t: 'lampo', slot: l.slot, id: msg.id }); break;
     case 'photo':
       // selfie del pilota (piccolo JPEG): va al PC principale che lo manda a tutti gli schermi
@@ -497,7 +497,8 @@ function switchTrack(id) {
 function startRace() {
   if (!W.players.length) return;
   prepMode();
-  const order = [...W.players].sort(() => Math.random() - 0.5);
+  // Torneo: corrono solo i piloti non ancora eliminati
+  const order = [...W.players].filter(p => !(W.gp && W.gp.out && W.gp.out.includes(p.slot))).sort(() => Math.random() - 0.5);
   W.grid = order.map((p, i) => ({ slot: p.slot, gi: i }));
   W.raceId = Date.now() % 1e9;
   W.phase = 'intro'; W.introT = 0; W.raceTime = 0; W.countdown = COUNTDOWN; W.results = [];
@@ -857,10 +858,22 @@ function handOf(slot) {
   if (!h) { h = { cards: [], cd: 0 }; hands.set(slot, h); }
   return h;
 }
+// attacchi in arrivo su un mio kart (carte con 1,5 s di ritardo, missili e polizia lanciati contro di lui)
+const INC_NAME = { drunk: 'SBRONZO', invert: 'STERZO AL CONTRARIO', handbrake: 'FRENO A MANO', mini: 'MINI', thief: 'LADRO', call: 'TELEFONATA',
+  slow: 'MAGNETE', remote: 'TELECOMANDO', swap: 'SCAMBIO', missile: 'RAZZO', police: 'POLIZIA' };
+function incomingInfo(slot) {
+  const k = karts.get(slot);
+  if (!k || W.phase !== 'race') return null;
+  if (k.incoming && k.incoming.length) { const q = k.incoming[0]; return { name: INC_NAME[q.kind] || 'ATTACCO', left: Math.round(q.t * 10) / 10 }; }
+  const m = (W.missiles || []).find(q => q.to === slot && q.life > 0);
+  if (m) return { name: INC_NAME[m.kind] || 'ATTACCO', left: 0 };
+  return null;
+}
+function underAttack(slot) { return !!incomingInfo(slot); }
 function handInfo(slot) {
   const h = hands.get(slot);
   if (!h) return { cards: [], cd: 0 };
-  return { cards: h.cards, cd: Math.max(0, Math.round(h.cd * 10) / 10) };
+  return { cards: h.cards, cd: Math.max(0, Math.round(h.cd * 10) / 10), inc: incomingInfo(slot) };
 }
 
 function addCard(slot, id, extra = false) {
@@ -887,9 +900,12 @@ function comboCards(slot, a, b) {
 function useCard(slot, i, to) {
   if (W.phase !== 'race' || W.paused || W.lampo) return;
   const h = hands.get(slot), k = karts.get(slot);
-  if (!h || !k || k.finished || h.cd > 0) return;
+  if (!h || !k || k.finished) return;
   const id = h.cards[i];
   if (!id) return;
+  // lo Scudo si può usare sempre quando sta arrivando un attacco (contromossa), anche durante la ricarica
+  const parry = (id === 'shield' || id === 'supershield') && underAttack(slot);
+  if (h.cd > 0 && !parry) return;
   const def = CARDS[id];
   if (def.target === 'pick' && (to == null || to === slot || !regBySlot(to))) return;
   if (id === 'swap') {
@@ -901,8 +917,14 @@ function useCard(slot, i, to) {
     if (!(gap >= 0 && gap <= SWAP_RANGE)) { addNote(slot, 'SCAMBIO: troppo lontano!', 'bad'); vibrate(slot, [10, 40, 10]); return; }
   }
   h.cards.splice(i, 1);
-  h.cd = COOLDOWN;
-  vibrate(slot, [20]);
+  // le prime due carte di fila si usano subito, la terza solo dopo 5 secondi
+  if (!parry) {
+    if (performance.now() - (h.lastUse || 0) > COOLDOWN * 1000) h.streak = 0;
+    h.streak = (h.streak || 0) + 1; h.lastUse = performance.now();
+    if (h.streak >= STREAK) { h.cd = COOLDOWN; h.streak = 0; }
+  }
+  if (parry) { addNote(slot, 'SCUDO! Attacco parato', 'ok'); vibrate(slot, [30, 30, 30]); }
+  else vibrate(slot, [20]);
   applySelf(k, id);
   const msg = { t: 'play', from: slot, card: id, to };
   if (id === 'oil' || id === 'trap') {
@@ -993,7 +1015,7 @@ function onMasterCmd(msg, sid) {
           const dir = t && raceDistance(track, t) < raceDistance(track, k) ? -1 : 1;
           const police = msg.card === 'police';
           W.missiles.push({ id: ++fxId, from, to, kind: msg.card, dir, s: (k.s + 3 * dir + track.length) % track.length, lat: k.lat,
-            life: police ? 7 : (to == null ? 2.5 : 12), speed: police ? 33 : 52, x: k.x, z: k.z, yaw: k.yaw });
+            life: police ? 8 : (to == null ? 2.5 : 12), speed: police ? 40 : 42, age: 0, x: k.x, z: k.z, yaw: k.yaw });
           break;
         }
         case 'oil':
@@ -1018,7 +1040,11 @@ function onMasterCmd(msg, sid) {
     case 'result': {
       // un dispetto è stato bloccato o rimandato indietro
       if (!owns(msg.to)) return;
-      if (msg.res === 'blocked') pushFeed(`${nameOf(msg.to)} si è protetto!`);
+      if (msg.res === 'blocked') {
+        pushFeed(`${nameOf(msg.to)} ha parato con lo Scudo!`);
+        const sa = stationOf(msg.from);
+        if (sa && msg.from != null && msg.from !== msg.to) toStation(sa, { t: 'parnote', slot: msg.from, name: nameOf(msg.to) });
+      }
       if (msg.res === 'mirror') {
         pushCfx('mirror', msg.to, msg.from);
         pushFeed(`Specchio! ${nameOf(msg.to)} rimanda a ${nameOf(msg.from)}`);
@@ -1051,14 +1077,23 @@ function onMasterCmd(msg, sid) {
 function masterCardsStep() {
   const L = track.length;
   for (const m of W.missiles) {
-    m.life -= DT;
+    m.life -= DT; m.age = (m.age || 0) + DT;
     const dir = m.dir || 1;
     m.s = (m.s + dir * (m.speed || 52) * DT + L) % L;
     const t = m.to != null ? karts.get(m.to) : null;
     if (t) {
       m.lat += (t.lat - m.lat) * Math.min(1, DT * 3);
       const d = dir > 0 ? (t.s - m.s + L) % L : (m.s - t.s + L) % L;
-      if (d < 2.5 || d > L - 4) { sendFx(m.to, m.from, m.kind); m.life = 0; m.hit = true; if (m.kind === 'missile') pushCfx('boom', m.from, m.to, { x: m.x, z: m.z }); }
+      // prima di colpire passa almeno 1,5 secondi: il bersaglio ha il tempo di attivare lo Scudo
+      if (m.age < INCOMING && (d < 6 || d > L - 4)) { m.s = (t.s - dir * 6 + L) % L; }   // resta a 6 metri finché non è "armato"
+      else if (d < 2.5 || d > L - 4) {
+        sendFx(m.to, m.from, m.kind); m.life = 0; m.hit = true;
+        if (m.kind === 'missile') {
+          pushCfx('boom', m.from, m.to, { x: m.x, z: m.z });
+          // esplosione larga: prende anche chi è vicino al bersaglio
+          for (const o of karts.values()) if (o.slot !== m.to && o.slot !== m.from && Math.hypot(o.x - t.x, o.z - t.z) < 9) sendFx(o.slot, m.from, 'splash');
+        }
+      }
     }
     if (m.life <= 0 && !m.hit && m.kind === 'police' && m.to != null) pushFeed(`${nameOf(m.to)} è scappato alla polizia!`);
     const p = track.pts[Math.floor(m.s / track.ds) % track.count];
@@ -1078,10 +1113,23 @@ function onStationCmd(msg) {
       vibrate(msg.slot, [30, 40, 30, 40, 90]);
       break;
     case 'card': addCard(msg.slot, msg.card, !!msg.extra); break;
+    case 'parnote':
+      if (!isLocalSlot(msg.slot)) return;
+      addNote(msg.slot, `PARATO da ${msg.name}`, 'bad');
+      vibrate(msg.slot, [10, 30, 10]);
+      break;
     case 'fx': {
       const k = karts.get(msg.to);
       if (!k || !isLocalSlot(msg.to)) return;
       if (msg.kind === 'swapto') { teleport(k, msg.data); vibrate(msg.to, [80, 40, 80]); return; }
+      // le carte di attacco arrivano dopo 1,5 secondi: c'è il tempo di parare con lo Scudo (contromossa)
+      if (INC_NAME[msg.kind] && msg.kind !== 'missile' && msg.kind !== 'police' && !msg.now) {
+        (k.incoming = k.incoming || []).push({ t: INCOMING, msg: { ...msg, now: true } });
+        addNote(msg.to, `${INC_NAME[msg.kind]} IN ARRIVO! Usa lo Scudo`, 'bad');
+        vibrate(msg.to, [60, 60, 60, 60, 60]);
+        pushStatus(true);
+        return;
+      }
       if (msg.kind === 'bomb') {
         const r = receive(k, 'bomb');
         if (r === 'ok') { k.bombT = BOMB_TIME; k.bombHold = BOMB_HOLD; vibrate(msg.to, [60, 30, 60]); }
@@ -1100,15 +1148,22 @@ function onStationCmd(msg) {
         return;
       }
       const r = receive(k, msg.kind);
+      if (r === 'blocked') addNote(msg.to, 'PARATO!', 'ok');
       if (r !== 'ok') { toMaster({ t: 'result', to: msg.to, from: msg.from, kind: msg.kind, res: r, data: msg.data }); return; }
+      if (msg.kind === 'splash') { vibrate(msg.to, [120]); addNote(msg.to, 'Preso dall\'esplosione!', 'bad'); return; }
       vibrate(msg.to, msg.kind === 'call' ? [400, 200, 400, 200, 400] : [150]);
       addBig(msg.to, msg.kind);
       if (msg.kind === 'call') { k.callFrom = msg.from; k.callBot = 0; }
       gotHit(msg.to, msg.from);
-      if (msg.kind === 'thief' || msg.kind === 'missile1') {
+      if (msg.kind === 'thief' || msg.kind === 'missile') {
         const h = hands.get(msg.to);
         if (h && h.cards.length) {
-          const [card] = h.cards.splice(Math.floor(Math.random() * h.cards.length), 1);
+          // il Ladro prende la carta migliore; il missile ne fa cadere una a caso
+          const RANK = { combo: 4, rara: 3, media: 2, comune: 1 };
+          let idx = Math.floor(Math.random() * h.cards.length);
+          if (msg.kind === 'thief') h.cards.forEach((c, j) => { if ((RANK[CARDS[c].rar] || 0) > (RANK[CARDS[h.cards[idx]].rar] || 0)) idx = j; });
+          const [card] = h.cards.splice(idx, 1);
+          if (msg.kind === 'missile') addNote(msg.to, `Hai perso: ${CARDS[card].name}`, 'bad');
           if (msg.kind === 'thief') toMaster({ t: 'give', from: msg.to, to: msg.from, card });
           pushStatus(true);
         }
@@ -1140,10 +1195,37 @@ function gotHit(victim, from) {
   toMaster({ t: 'hitok', from, to: victim });
 }
 
+const warnedMissiles = new Set();
 function cardsStep(mine, now) {
   const L = track.length;
   for (const k of mine) {
     const h = handOf(k.slot);
+    // attacchi in arrivo: allo scadere dei 1,5 secondi arrivano davvero (se c'è lo Scudo attivo, vengono parati)
+    if (k.incoming && k.incoming.length) {
+      for (const q of k.incoming) q.t -= DT;
+      const due = k.incoming.filter(q => q.t <= 0);
+      k.incoming = k.incoming.filter(q => q.t > 0);
+      for (const q of due) onStationCmd({ t: 'fx', ...q.msg });
+      if (due.length) pushStatus(true);
+    }
+    for (const m of W.missiles || []) if (m.to === k.slot && !warnedMissiles.has(m.id)) {
+      warnedMissiles.add(m.id);
+      addNote(k.slot, `${m.kind === 'police' ? 'POLIZIA' : 'RAZZO'} IN ARRIVO! Usa lo Scudo`, 'bad');
+      vibrate(k.slot, [60, 60, 60, 60, 60]);
+      pushStatus(true);
+    }
+    // i computer, se hanno lo Scudo, a volte parano
+    const l = localBySlot(k.slot);
+    if (l && l.brain && underAttack(k.slot) && !(k.shieldT > 0)) {
+      k.parryT = (k.parryT || 0) + DT;
+      if (k.parryT > 0.6 && !k.parryTried) {
+        k.parryTried = true;
+        const chance = { facile: 0.3, normale: 0.55, difficile: 0.8 }[cpuLevel] || 0.55;
+        const si = h.cards.findIndex(c => c === 'shield' || c === 'supershield');
+        if (si >= 0 && Math.random() < chance) useCard(k.slot, si, null);
+      }
+    } else if (!underAttack(k.slot)) { k.parryT = 0; k.parryTried = false; }
+    if (k.events && k.events.includes('squash')) { addNote(k.slot, 'SCHIACCIATO!', 'bad'); vibrate(k.slot, [200]); }
     if (h.cd > 0) h.cd = Math.max(0, h.cd - DT * (k.slowmoT > 0 ? 0.5 : 1));   // Telecomando: anche la ricarica va piano
     // portali: passo sopra → chiedo una carta (decide il PC principale chi è arrivato prima)
     if (k.lapCount >= 1 && !k.finished) {
@@ -1157,7 +1239,7 @@ function cardsStep(mine, now) {
     for (const hz of W.hazards) {
       if (hitHazards.has(hz.id)) continue;
       if (hz.owner === k.slot && now - hz.born < 1.2) continue;
-      if (Math.hypot(k.x - hz.x, k.z - hz.z) > 2.4 || k.air) continue;
+      if (Math.hypot(k.x - hz.x, k.z - hz.z) > 3.3 || k.air) continue;
       hitHazards.add(hz.id);
       const r = receive(k, hz.kind);
       if (r === 'mirror') k.mirror = 0;
@@ -1472,7 +1554,8 @@ function frame(now) {
   last = now;
   let snap = renderSnap();
   // in automatico ogni schermo mostra solo i piloti collegati a lui
-  const players = playerList();
+  // (Torneo) chi è eliminato non ha più il kart: niente riquadro per lui
+  const players = playerList().filter(p => W.phase === 'lobby' || !karts.size || karts.has(p.slot));
   const here = players.filter(p => p.here);
   let slots = W.phase === 'lobby' ? [-1] : screen.slots(screen.mode === 'auto' && here.length ? here : players);
   if (window.__forceSlots && W.phase !== 'lobby') slots = window.__forceSlots;   // solo test (video)
@@ -1834,7 +1917,6 @@ function endPlay() {
 function finishRanking(ranking) {
   const P = W.pit;
   P.results = ranking.map(r => ({ ...r, prize: P.grid ? { text: `Parti ${r.place}°` } : P.battle ? { text: `${r.place}° posto` } : prizeFor(r.place, ranking.length) }));
-  if (W.mode === 'torneo') tournamentMg(P.results);
   P.stage = 'results'; P.stageT = 0;
   pushStatus(true);
 }
@@ -1933,7 +2015,7 @@ function prepMode() {
   gpNextAt = 0;
   if (!M || !M.races) { W.gp = null; return; }
   if (W.phase === 'lobby' || !W.gp || W.gp.final || W.gp.mode !== W.mode) {
-    W.gp = { mode: W.mode, race: 1, of: M.races, sc: {}, table: [], final: false, champion: null, firstTrack: track.id };
+    W.gp = { mode: W.mode, race: 1, of: M.elim ? Math.max(1, W.players.length - 1) : M.races, sc: {}, table: [], final: false, champion: null, firstTrack: track.id, out: [] };
   } else W.gp.race++;
   if (TRACK_IDS.length > 1) {
     const i0 = Math.max(0, TRACK_IDS.indexOf(W.gp.firstTrack));
@@ -1991,12 +2073,24 @@ function modeResults() {
     for (const r of W.results) {
       const e = gpEntry(r.slot);
       const p = PTS[r.place - 1] || 0;
-      r.pts = p; e.pts += p; e.race += p; e.last = r.place; e.color = r.color;
+      r.pts = W.gp.mode === 'torneo' ? 0 : p; e.pts += p; e.race += p; e.last = r.place; e.color = r.color;
       if (r.place === 1) e.wins++;
     }
-    gpTable();
-    W.gp.final = W.gp.race >= W.gp.of;
-    W.gp.champion = W.gp.final && W.gp.table[0] ? W.gp.table[0].name : null;
+    if (W.gp.mode === 'torneo') {
+      // Torneo a eliminazione: l'ultimo di questa gara è fuori; vince l'ultimo che resta
+      const last = [...W.results].sort((a, b) => b.place - a.place)[0];
+      if (last && W.results.length > 1) { W.gp.out.push(last.slot); const e = gpEntry(last.slot); e.outAt = W.gp.race; pushFeed(`${last.name} è eliminato!`); }
+      const alive = W.results.filter(r => !W.gp.out.includes(r.slot));
+      for (const e of Object.values(W.gp.sc)) e.pts = e.outAt ? e.outAt : 100;
+      gpTable();
+      W.gp.final = alive.length <= 1;
+      W.gp.of = W.gp.final ? W.gp.race : Math.max(W.gp.of, W.gp.race + 1);
+      W.gp.champion = W.gp.final && alive[0] ? alive[0].name : null;
+    } else {
+      gpTable();
+      W.gp.final = W.gp.race >= W.gp.of;
+      W.gp.champion = W.gp.final && W.gp.table[0] ? W.gp.table[0].name : null;
+    }
     gpNextAt = W.gp.final ? 0 : performance.now() + GP_NEXT_MS;
   }
   saveStoria();
@@ -2063,7 +2157,7 @@ function drawModeSel() {
   let txt = 'Una gara con carte e minigiochi ai pit stop.';
   if (W.mode === 'gp') txt = `4 gare di fila${TRACK_IDS.length > 1 ? ' (si cambia pista)' : ''}. Punti: 10, 7, 5, 3, 2, 1. Chi ne fa di più è campione.`;
   else if (W.mode === 'battaglia') txt = 'Niente gara: tutti nell\'arena con 3 palloncini. Centra gli altri col muso per scoppiarli, l\'ultimo rimasto vince.';
-  else if (W.mode === 'torneo') txt = '3 gare a punti (10, 7, 5, 3…) e anche i minigiochi danno punti: 3, 2, 1.';
+  else if (W.mode === 'torneo') txt = 'A eliminazione: dopo ogni gara l\'ultimo è fuori. Contano solo le gare. L\'ultimo che resta è il campione.';
   else if (W.mode === 'tempo') {
     const rec = MASTER ? recordText(track.id, W.laps) : '';
     txt = `Niente carte né pit stop: conta solo il tempo. ${rec ? `Record ${tname}: ${rec}` : `Ancora nessun record su ${tname}.`}`;
@@ -2097,9 +2191,9 @@ function drawModePodium() {
     }
     const rows = (G.table || []).map(e => {
       const r = W.results.find(x => x.slot === e.slot && x.name === e.name);
-      const sub = G.mode === 'torneo' ? `<small>gare ${e.race} · minigiochi ${e.mg}</small>` : (e.wins ? `<small>${e.wins} ${e.wins === 1 ? 'vittoria' : 'vittorie'}</small>` : '');
+      const sub = G.mode === 'torneo' ? `<small>${e.outAt ? `eliminato alla gara ${e.outAt}` : (G.final ? 'CAMPIONE' : 'ancora in gara')}</small>` : (e.wins ? `<small>${e.wins} ${e.wins === 1 ? 'vittoria' : 'vittorie'}</small>` : '');
       return `<tr class="${e.place === 1 ? 'lead' : ''}"><td class="gp-pl">${e.place}°</td><td><span class="sw" style="background:${esc(e.color)}"></span><span class="n">${esc(e.name)}</span>${sub}</td>` +
-        `<td class="r gp-plus">${r && r.pts ? '+' + r.pts : ''}</td><td class="r gp-pts">${e.pts}</td></tr>`;
+        `<td class="r gp-plus">${G.mode !== 'torneo' && r && r.pts ? '+' + r.pts : ''}</td><td class="r gp-pts">${G.mode === 'torneo' ? (e.outAt ? '✕' : '★') : e.pts}</td></tr>`;
     }).join('');
     box.innerHTML = `<div class="label">Classifica ${label}</div><table class="gp-table">${rows}</table>`;
   } else if (W.mode === 'tempo') {

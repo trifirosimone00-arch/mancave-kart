@@ -19,7 +19,7 @@ const clampIn = (p, m = 4) => ({ x: Math.max(OX - HW + m, Math.min(OX + HW - m, 
 // kind/title/help per la TV e il telefono; dur = durata (1 minuto), short = versione corta
 export const KART_GAMES = {
   parcheggio: { title: 'Parcheggio', emoji: '🅿️', dur: 50, short: 30, help: 'Un posto auto si accende sul tavolo: entraci e fermati (FRENO) dentro le strisce. Ogni parcheggio è un punto.' },
-  slalom:     { title: 'Slalom tra le lattine', emoji: '🥫', dur: 50, short: 30, help: 'Passa tra le lattine in ordine, porta dopo porta. Chi passa più porte vince.' },
+  // (lo Slalom tra le lattine è stato tolto: a Simone non piaceva)
   bowling:    { title: 'Bowling', emoji: '🎳', dur: 45, short: 30, help: 'Butta giù i birilli col kart! Ogni birillo che cade è un punto per chi l\'ha colpito.' },
   collina:    { title: 'Re della collina', emoji: '👑', dur: 45, short: 30, help: 'Resta nel cerchio dorato: da solo fai punti doppi. Spingi fuori gli altri a spallate.' },
   autoscontro:{ title: 'Autoscontro', emoji: '💥', dur: 45, short: 30, help: 'Centra gli altri col muso del kart: ogni botta data è un punto, chi la prende gira su se stesso.' },

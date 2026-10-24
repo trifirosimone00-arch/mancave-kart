@@ -969,7 +969,7 @@ export function createRenderer(canvas, hudRoot, track) {
       pm.card.rotation.y = tsec * 2.5;
       pm.glow.color.set(ready ? '#ffd400' : '#6b7080');
     });
-    syncPool('oil', snap.hazards, () => { const o = new THREE.Mesh(oilGeo, oilMat); o.rotation.x = -Math.PI / 2; o.scale.setScalar(1.4); return o; },
+    syncPool('oil', snap.hazards, () => { const o = new THREE.Mesh(oilGeo, oilMat); o.rotation.x = -Math.PI / 2; return o; },
       (o, h) => o.position.set(h.x, groundAt(o, h.x, h.z) + 0.1, h.z));
     syncPool('missile', snap.missiles, (it) => (it.kind === 'police' ? makePolice() : makeMissile()), (o, m) => {
       if (m.kind === 'police') {

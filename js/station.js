@@ -4,7 +4,7 @@
 // Ogni schermo calcola i kart dei telefoni collegati a lui (niente ritardo nella guida)
 // e scambia via internet solo le posizioni degli altri.
 import { buildTrack, obstaclesAt, TRACK_LIST } from './track.js';
-import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance, placeAt, giveBoost } from './sim.js';
+import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance, placeAt, giveBoost, MAX_SPEED } from './sim.js';
 import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, STREAK, INCOMING, PORTAL_COOLDOWN, PORTAL_FRACTIONS } from './cards.js';
 import { createRenderer, kartThumb } from './render.js';
 import { PILOTS, freePilotColor } from './pilots.js';
@@ -221,7 +221,7 @@ function onPhoneMsg(conn, msg) {
     case 'mg': if (W.pit && msg.s && typeof msg.s === 'object' && msg.s.id === W.pit.id && JSON.stringify(msg.s).length < 3000) l.mg = msg.s; break;
     case 'offer': pickOffer(l.slot, msg.pick); break;
     case 'pitskip': command(l.slot, { t: 'pitskip', id: msg.id, stage: msg.stage }); break;
-    case 'callend': { const k = karts.get(l.slot); if (k && k.callT > 0) { k.callT = 0; k.callAfterT = 0.5; pushStatus(true); } break; }
+    case 'callend': { const k = karts.get(l.slot); if (k && k.callT > 0) { k.callT = 0; pushStatus(true); } break; }
     case 'lampo': if (W.lampo && msg.id === W.lampo.id) toMaster({ t: 'lampo', slot: l.slot, id: msg.id }); break;
     case 'photo':
       // selfie del pilota (piccolo JPEG): va al PC principale che lo manda a tutti gli schermi
@@ -1012,10 +1012,17 @@ function onMasterCmd(msg, sid) {
           // parte verso il bersaglio: avanti se è davanti, indietro se è dietro
           const k = karts.get(from), t = to != null ? karts.get(to) : null;
           if (!k) return;
-          const dir = t && raceDistance(track, t) < raceDistance(track, k) ? -1 : 1;
           const police = msg.card === 'police';
+          if (police && t) {
+            // la polizia parte poco dietro al bersaglio e va veloce quasi quanto un kart al massimo:
+            // se guidi perfetto la semini, al primo errore (muro, olio, frenata) ti prende
+            W.missiles.push({ id: ++fxId, from, to, kind: 'police', dir: 1, s: (t.s - 24 + track.length) % track.length, lat: t.lat,
+              life: 9, speed: MAX_SPEED * 0.97, age: 0, x: t.x, z: t.z, yaw: t.yaw });
+            break;
+          }
+          const dir = t && raceDistance(track, t) < raceDistance(track, k) ? -1 : 1;
           W.missiles.push({ id: ++fxId, from, to, kind: msg.card, dir, s: (k.s + 3 * dir + track.length) % track.length, lat: k.lat,
-            life: police ? 8 : (to == null ? 2.5 : 12), speed: police ? 40 : 42, age: 0, x: k.x, z: k.z, yaw: k.yaw });
+            life: police ? 8 : (to == null ? 2.5 : 12), speed: police ? 40 : 52, age: 0, x: k.x, z: k.z, yaw: k.yaw });
           break;
         }
         case 'oil':
@@ -1085,17 +1092,15 @@ function masterCardsStep() {
       m.lat += (t.lat - m.lat) * Math.min(1, DT * 3);
       const d = dir > 0 ? (t.s - m.s + L) % L : (m.s - t.s + L) % L;
       // prima di colpire passa almeno 1,5 secondi: il bersaglio ha il tempo di attivare lo Scudo
-      if (m.age < INCOMING && (d < 6 || d > L - 4)) { m.s = (t.s - dir * 6 + L) % L; }   // resta a 6 metri finché non è "armato"
+      if (m.kind === 'missile' && m.age < INCOMING && (d < 6 || d > L - 4)) { m.s = (t.s - dir * 6 + L) % L; }   // resta a 6 metri finché non è "armato"
       else if (d < 2.5 || d > L - 4) {
         sendFx(m.to, m.from, m.kind); m.life = 0; m.hit = true;
         if (m.kind === 'missile') {
           pushCfx('boom', m.from, m.to, { x: m.x, z: m.z });
-          // esplosione larga: prende anche chi è vicino al bersaglio
-          for (const o of karts.values()) if (o.slot !== m.to && o.slot !== m.from && Math.hypot(o.x - t.x, o.z - t.z) < 9) sendFx(o.slot, m.from, 'splash');
         }
       }
     }
-    if (m.life <= 0 && !m.hit && m.kind === 'police' && m.to != null) pushFeed(`${nameOf(m.to)} è scappato alla polizia!`);
+    if (m.life <= 0 && !m.hit && m.kind === 'police' && m.to != null) { pushFeed(`${nameOf(m.to)} ha seminato la polizia!`); const so = stationOf(m.to); if (so) toStation(so, { t: 'parnote2', slot: m.to }); }
     const p = track.pts[Math.floor(m.s / track.ds) % track.count];
     m.x = p.x + p.rx * m.lat; m.z = p.z + p.rz * m.lat; m.yaw = Math.atan2(p.tx, p.tz) + (dir < 0 ? Math.PI : 0);
   }
@@ -1113,6 +1118,9 @@ function onStationCmd(msg) {
       vibrate(msg.slot, [30, 40, 30, 40, 90]);
       break;
     case 'card': addCard(msg.slot, msg.card, !!msg.extra); break;
+    case 'parnote2':
+      if (isLocalSlot(msg.slot)) { addNote(msg.slot, 'POLIZIA SEMINATA!', 'ok'); vibrate(msg.slot, [30, 30, 30]); }
+      break;
     case 'parnote':
       if (!isLocalSlot(msg.slot)) return;
       addNote(msg.slot, `PARATO da ${msg.name}`, 'bad');
@@ -1155,15 +1163,13 @@ function onStationCmd(msg) {
       addBig(msg.to, msg.kind);
       if (msg.kind === 'call') { k.callFrom = msg.from; k.callBot = 0; }
       gotHit(msg.to, msg.from);
-      if (msg.kind === 'thief' || msg.kind === 'missile') {
+      if (msg.kind === 'thief') {
         const h = hands.get(msg.to);
         if (h && h.cards.length) {
           // il Ladro prende la carta migliore; il missile ne fa cadere una a caso
           const RANK = { combo: 4, rara: 3, media: 2, comune: 1 };
           let idx = Math.floor(Math.random() * h.cards.length);
-          if (msg.kind === 'thief') h.cards.forEach((c, j) => { if ((RANK[CARDS[c].rar] || 0) > (RANK[CARDS[h.cards[idx]].rar] || 0)) idx = j; });
           const [card] = h.cards.splice(idx, 1);
-          if (msg.kind === 'missile') addNote(msg.to, `Hai perso: ${CARDS[card].name}`, 'bad');
           if (msg.kind === 'thief') toMaster({ t: 'give', from: msg.to, to: msg.from, card });
           pushStatus(true);
         }
@@ -1210,7 +1216,7 @@ function cardsStep(mine, now) {
     }
     for (const m of W.missiles || []) if (m.to === k.slot && !warnedMissiles.has(m.id)) {
       warnedMissiles.add(m.id);
-      addNote(k.slot, `${m.kind === 'police' ? 'POLIZIA' : 'RAZZO'} IN ARRIVO! Usa lo Scudo`, 'bad');
+      addNote(k.slot, m.kind === 'police' ? 'POLIZIA! Seminala senza sbagliare (o usa lo Scudo)' : 'RAZZO IN ARRIVO! Usa lo Scudo', 'bad');
       vibrate(k.slot, [60, 60, 60, 60, 60]);
       pushStatus(true);
     }
@@ -1225,7 +1231,7 @@ function cardsStep(mine, now) {
         if (si >= 0 && Math.random() < chance) useCard(k.slot, si, null);
       }
     } else if (!underAttack(k.slot)) { k.parryT = 0; k.parryTried = false; }
-    if (k.events && k.events.includes('squash')) { addNote(k.slot, 'SCHIACCIATO!', 'bad'); vibrate(k.slot, [200]); }
+
     if (h.cd > 0) h.cd = Math.max(0, h.cd - DT * (k.slowmoT > 0 ? 0.5 : 1));   // Telecomando: anche la ricarica va piano
     // portali: passo sopra → chiedo una carta (decide il PC principale chi è arrivato prima)
     if (k.lapCount >= 1 && !k.finished) {
@@ -1239,7 +1245,7 @@ function cardsStep(mine, now) {
     for (const hz of W.hazards) {
       if (hitHazards.has(hz.id)) continue;
       if (hz.owner === k.slot && now - hz.born < 1.2) continue;
-      if (Math.hypot(k.x - hz.x, k.z - hz.z) > 3.3 || k.air) continue;
+      if (Math.hypot(k.x - hz.x, k.z - hz.z) > 2.4 || k.air) continue;
       hitHazards.add(hz.id);
       const r = receive(k, hz.kind);
       if (r === 'mirror') k.mirror = 0;

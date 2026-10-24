@@ -423,7 +423,7 @@ function drawHand(s) {
   const inc = $('incoming');
   if (inc) {
     inc.classList.toggle('hidden', !h.inc);
-    if (h.inc) inc.innerHTML = `<b>${h.inc.name} IN ARRIVO!</b><span>${h.cards.some(c => c === 'shield' || c === 'supershield') ? 'Tocca lo SCUDO per pararlo!' : 'Non hai lo Scudo…'}</span>`;
+    if (h.inc) inc.innerHTML = h.inc.name === 'POLIZIA' ? `<b>POLIZIA!</b><span>Seminala: non sbagliare niente${h.cards.some(c => c === 'shield' || c === 'supershield') ? ' (o usa lo SCUDO)' : ''}</span>` : `<b>${h.inc.name} IN ARRIVO!</b><span>${h.cards.some(c => c === 'shield' || c === 'supershield') ? 'Tocca lo SCUDO per pararlo!' : 'Non hai lo Scudo…'}</span>`;
   }
   el.classList.toggle('parry', !!h.inc);
   const hint = $('hand-hint');

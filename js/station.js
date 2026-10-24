@@ -86,6 +86,9 @@ W.mgShort = !!store.get('mg-short', false);
 W.mgType = ['phone', 'kart', 'mix'].includes(store.get('mg-type', 'mix')) ? store.get('mg-type', 'mix') : 'mix';
 // modalità di gioco (vedi "modalità" più sotto): gara singola, Gran Premio, contro il tempo, torneo
 W.mode = MODES[store.get('mode', 'singola')] ? store.get('mode', 'singola') : 'singola';
+// piste del Gran Premio / Torneo, nell'ordine in cui si corrono (scelte nella lobby)
+W.gpTracks = (store.get('gp-tracks', null) || TRACK_IDS).filter(id => TRACK_IDS.includes(id));
+if (!W.gpTracks.length) W.gpTracks = [...TRACK_IDS];
 W.gp = null;                      // serie in corso (Gran Premio / Torneo): gara, punti, classifica
 W.rec = null;                     // (contro il tempo) record battuti nell'ultima gara
 W.quizCats = (store.get('quiz-cats', QUIZ_CATS) || []).filter(c => QUIZ_CATS.includes(c));
@@ -1284,7 +1287,7 @@ function onPhaseChange() {
 let lobbySig = '';
 let cpuLevel = CPU_LEVELS[store.get('cpu-level', 'normale')] ? store.get('cpu-level', 'normale') : 'normale';
 function drawLobby() {
-  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel, W.mgShort, W.mgType, W.quizCats, track.id, W.night, photoVer, W.mode]);
+  const sig = JSON.stringify([W.players, W.laps, W.captain, stations.size, [...locals.keys()], cpuLevel, W.mgShort, W.mgType, W.quizCats, track.id, W.night, photoVer, W.mode, W.gpTracks]);
   if (sig === lobbySig) return;
   lobbySig = sig;
   const el = $('players');
@@ -1338,14 +1341,31 @@ function drawLobby() {
   $('cpu-box').classList.toggle('hidden', !MASTER);
   $('mg-settings').classList.toggle('hidden', !MASTER);
   drawMgSettings();
+  // piste con la foto: in gara singola se ne sceglie una; in Gran Premio e Torneo si scelgono quali correre (e l'ordine)
   const tr = $('track-sel');
   if (tr) {
+    const series = !!(MODES[W.mode] && MODES[W.mode].races);
+    $('track-label').textContent = series ? `Piste del ${W.mode === 'torneo' ? 'Torneo' : 'Gran Premio'} · tocca per aggiungere o togliere (si corrono in ordine)` : 'Pista';
     tr.innerHTML = '';
     for (const t of TRACK_LIST) {
       const b = document.createElement('button');
-      b.type = 'button'; b.textContent = t.name; b.className = track.id === t.id ? 'on' : '';
+      b.type = 'button';
+      const n = W.gpTracks.indexOf(t.id);
+      const on = series ? n >= 0 : track.id === t.id;
+      b.className = 'track-card' + (on ? ' on' : '') + (series && n < 0 ? ' off' : '');
+      b.innerHTML = `<img src="assets/piste/${t.id}.jpg" alt=""><span>${t.name}</span>` + (series && n >= 0 ? `<b>${n + 1}</b>` : '');
       b.disabled = !MASTER;
-      b.onclick = () => { if (MASTER && W.phase === 'lobby') { switchTrack(t.id); pushStatus(true); } };
+      b.onclick = () => {
+        if (!MASTER || W.phase !== 'lobby') return;
+        if (series) {
+          const i = W.gpTracks.indexOf(t.id);
+          if (i >= 0) { if (W.gpTracks.length > 1) W.gpTracks.splice(i, 1); } else W.gpTracks.push(t.id);
+          store.set('gp-tracks', W.gpTracks);
+          if (!W.gpTracks.includes(track.id)) switchTrack(W.gpTracks[0]);
+          lobbySig = ''; drawLobby();
+        } else switchTrack(t.id);
+        pushStatus(true);
+      };
       tr.appendChild(b);
     }
   }
@@ -2023,11 +2043,10 @@ function prepMode() {
   if (W.phase === 'lobby' || !W.gp || W.gp.final || W.gp.mode !== W.mode) {
     W.gp = { mode: W.mode, race: 1, of: M.elim ? Math.max(1, W.players.length - 1) : M.races, sc: {}, table: [], final: false, champion: null, firstTrack: track.id, out: [] };
   } else W.gp.race++;
-  if (TRACK_IDS.length > 1) {
-    const i0 = Math.max(0, TRACK_IDS.indexOf(W.gp.firstTrack));
-    const id = TRACK_IDS[(i0 + W.gp.race - 1) % TRACK_IDS.length];
-    if (id !== track.id) switchTrack(id);
-  }
+  // le piste scelte nella lobby, in ordine (se sono meno delle gare si ricomincia dalla prima)
+  const list = W.gpTracks.length ? W.gpTracks : TRACK_IDS;
+  const id = list[(W.gp.race - 1) % list.length];
+  if (id && id !== track.id) switchTrack(id);
 }
 
 // (PC principale, ogni passo di gara) quando un kart passa il traguardo segno il tempo del giro
@@ -2161,7 +2180,7 @@ function drawModeSel() {
   const info = $('mode-info');
   const tname = (TRACK_LIST.find(t => t.id === track.id) || {}).name || track.id;
   let txt = 'Una gara con carte e minigiochi ai pit stop.';
-  if (W.mode === 'gp') txt = `4 gare di fila${TRACK_IDS.length > 1 ? ' (si cambia pista)' : ''}. Punti: 10, 7, 5, 3, 2, 1. Chi ne fa di più è campione.`;
+  if (W.mode === 'gp') txt = `4 gare di fila sulle piste scelte qui sotto. Punti: 10, 7, 5, 3, 2, 1. Chi ne fa di più è campione.`;
   else if (W.mode === 'battaglia') txt = 'Niente gara: tutti nell\'arena con 3 palloncini. Centra gli altri col muso per scoppiarli, l\'ultimo rimasto vince.';
   else if (W.mode === 'torneo') txt = 'A eliminazione: dopo ogni gara l\'ultimo è fuori. Contano solo le gare. L\'ultimo che resta è il campione.';
   else if (W.mode === 'tempo') {

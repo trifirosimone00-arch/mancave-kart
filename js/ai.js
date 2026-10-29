@@ -1,6 +1,6 @@
 // Piloti guidati dal computer (CPU).
 import { doorOpen } from './track.js';
-import { CARDS } from './cards.js';
+import { CARDS, SPARE } from './cards.js';
 import { kartBlocked, groundHeight, solidPush } from './track.js';
 
 export const CPU_LEVELS = {
@@ -130,9 +130,12 @@ export function cpuInput(track, k, brain, dt, ctx) {
 
   // carte
   brain.cardT -= dt;
-  if (brain.cardT <= 0 && ctx.hand && ctx.hand.cards.length && ctx.hand.cd <= 0) {
-    const i = Math.floor(Math.random() * ctx.hand.cards.length);
-    const def = CARDS[ctx.hand.cards[i]];
+  if (brain.cardT <= 0 && ctx.hand && (ctx.hand.cards.length || ctx.hand.spare) && ctx.hand.cd <= 0) {
+    // sceglie a caso tra le carte in mano e quella a contatore, se è pronta
+    const opts = ctx.hand.cards.map((_, j) => j);
+    if (ctx.hand.spare) opts.push(SPARE);
+    const i = opts[Math.floor(Math.random() * opts.length)];
+    const def = CARDS[i === SPARE ? ctx.hand.spare : ctx.hand.cards[i]];
     let to = null;
     if (def.target === 'pick' && ctx.others.length) {
       // preferisce chi è davanti

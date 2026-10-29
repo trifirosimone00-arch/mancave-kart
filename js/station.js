@@ -5,7 +5,7 @@
 // e scambia via internet solo le posizioni degli altri.
 import { buildTrack, obstaclesAt, TRACK_LIST } from './track.js';
 import { createKart, stepKart, collideKarts, collideWithRemote, resolveStartBoost, raceDistance, placeAt, giveBoost, MAX_SPEED } from './sim.js';
-import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, STREAK, INCOMING, PORTAL_COOLDOWN, PORTAL_FRACTIONS } from './cards.js';
+import { CARDS, comboOf, drawCard, receive, applySelf, HAND_SIZE, COOLDOWN, STREAK, INCOMING, PORTAL_COOLDOWN, PORTAL_FRACTIONS, SPARE, COUNTER_SECS } from './cards.js';
 import { createRenderer, kartThumb } from './render.js';
 import { PILOTS, freePilotColor } from './pilots.js';
 import { createScreenConfig, bindLayoutButtons, bindScreenBar } from './screen-ui.js';
@@ -220,6 +220,7 @@ function onPhoneMsg(conn, msg) {
       command(l.slot, msg);
       break;
     case 'use': useCard(l.slot, Number(msg.i), msg.to == null ? null : Number(msg.to)); break;
+    case 'drop': dropCard(l.slot, Number(msg.i)); break;
     case 'combo': comboCards(l.slot, Number(msg.a), Number(msg.b)); break;
     case 'mg': if (W.pit && msg.s && typeof msg.s === 'object' && msg.s.id === W.pit.id && JSON.stringify(msg.s).length < 3000) l.mg = msg.s; break;
     case 'offer': pickOffer(l.slot, msg.pick); break;
@@ -858,7 +859,7 @@ function toStation(sid, msg) {
 
 function handOf(slot) {
   let h = hands.get(slot);
-  if (!h) { h = { cards: [], cd: 0 }; hands.set(slot, h); }
+  if (!h) { h = { cards: [], cd: 0, spare: null, ctr: 0 }; hands.set(slot, h); }
   return h;
 }
 // attacchi in arrivo su un mio kart (carte con 1,5 s di ritardo, missili e polizia lanciati contro di lui)
@@ -875,8 +876,8 @@ function incomingInfo(slot) {
 function underAttack(slot) { return !!incomingInfo(slot); }
 function handInfo(slot) {
   const h = hands.get(slot);
-  if (!h) return { cards: [], cd: 0 };
-  return { cards: h.cards, cd: Math.max(0, Math.round(h.cd * 10) / 10), inc: incomingInfo(slot) };
+  if (!h) return { cards: [], cd: 0, spare: null, ctr: 0 };
+  return { cards: h.cards, cd: Math.max(0, Math.round(h.cd * 10) / 10), spare: h.spare || null, ctr: h.spare ? 1 : Math.min(1, (h.ctr || 0) / COUNTER_SECS), inc: incomingInfo(slot) };
 }
 
 function addCard(slot, id, extra = false) {
@@ -886,6 +887,18 @@ function addCard(slot, id, extra = false) {
   h.cards.push(id);
   audio.play('card');
   vibrate(slot, [30, 40, 30]);
+  pushStatus(true);
+}
+
+// scarto: una carta in mano cade sulla pista, dietro al kart; la raccoglie chi ci passa sopra, e sparisce a fine giro
+function dropCard(slot, i) {
+  if (W.phase !== 'race' || W.paused || W.lampo) return;
+  const h = hands.get(slot), k = karts.get(slot);
+  if (!h || !k || k.finished || !(i >= 0 && i < h.cards.length)) return;   // la carta a contatore non si scarta
+  const id = h.cards.splice(i, 1)[0];
+  const fx = Math.sin(k.yaw), fz = Math.cos(k.yaw);
+  toMaster({ t: 'drop', from: slot, card: id, pos: { x: k.x - fx * 4, z: k.z - fz * 4 }, lap: k.lapCount });
+  vibrate(slot, [20, 30, 20]);
   pushStatus(true);
 }
 
@@ -904,7 +917,8 @@ function useCard(slot, i, to) {
   if (W.phase !== 'race' || W.paused || W.lampo) return;
   const h = hands.get(slot), k = karts.get(slot);
   if (!h || !k || k.finished) return;
-  const id = h.cards[i];
+  const isSpare = i === SPARE && !!h.spare;
+  const id = isSpare ? h.spare : h.cards[i];
   if (!id) return;
   // lo Scudo si può usare sempre quando sta arrivando un attacco (contromossa), anche durante la ricarica
   const parry = (id === 'shield' || id === 'supershield') && underAttack(slot);
@@ -919,7 +933,7 @@ function useCard(slot, i, to) {
     const gap = t ? raceDistance(track, t) - raceDistance(track, k) : Infinity;
     if (!(gap >= 0 && gap <= SWAP_RANGE)) { addNote(slot, 'SCAMBIO: troppo lontano!', 'bad'); vibrate(slot, [10, 40, 10]); return; }
   }
-  h.cards.splice(i, 1);
+  if (isSpare) { h.spare = null; h.ctr = 0; } else h.cards.splice(i, 1);
   // le prime due carte di fila si usano subito, la terza solo dopo 5 secondi
   if (!parry) {
     if (performance.now() - (h.lastUse || 0) > COOLDOWN * 1000) h.streak = 0;
@@ -998,6 +1012,19 @@ function onMasterCmd(msg, sid) {
       if (!(i >= 0 && i < W.portals.length) || W.portals[i] > W.raceTime) return;
       W.portals[i] = W.raceTime + PORTAL_COOLDOWN;
       toStation(sid, { t: 'card', slot: msg.slot, card: drawCard() });
+      break;
+    }
+    case 'drop': {
+      if (!owns(msg.from) || W.phase !== 'race' || !CARDS[msg.card] || !msg.pos) return;
+      W.hazards.push({ id: ++fxId, kind: 'card', card: msg.card, x: msg.pos.x, z: msg.pos.z, owner: msg.from, lap: msg.lap, born: W.raceTime });
+      break;
+    }
+    case 'card-pick': {
+      const hz = W.hazards.find(h => h.id === msg.id && h.kind === 'card');
+      if (!hz || !owns(msg.slot)) return;
+      W.hazards = W.hazards.filter(h => h.id !== msg.id);
+      const st = stationOf(msg.slot);
+      if (st) toStation(st, { t: 'card', slot: msg.slot, card: hz.card });
       break;
     }
     case 'play': {
@@ -1108,7 +1135,8 @@ function masterCardsStep() {
     m.x = p.x + p.rx * m.lat; m.z = p.z + p.rz * m.lat; m.yaw = Math.atan2(p.tx, p.tz) + (dir < 0 ? Math.PI : 0);
   }
   W.missiles = W.missiles.filter(m => m.life > 0);
-  W.hazards = W.hazards.filter(h => W.raceTime - h.born < 25);
+  // le carte a terra restano finché chi le ha scartate non finisce il giro; le altre cose durano 25 secondi
+  W.hazards = W.hazards.filter(h => h.kind === 'card' ? (karts.get(h.owner) && karts.get(h.owner).lapCount <= h.lap) : W.raceTime - h.born < 25);
   W.feed = W.feed.filter(f => f.until > W.raceTime);
 }
 
@@ -1236,6 +1264,11 @@ function cardsStep(mine, now) {
     } else if (!underAttack(k.slot)) { k.parryT = 0; k.parryTried = false; }
 
     if (h.cd > 0) h.cd = Math.max(0, h.cd - DT * (k.slowmoT > 0 ? 0.5 : 1));   // Telecomando: anche la ricarica va piano
+    // carta a contatore: si riempie col tempo (il doppio nell'ultimo giro); ce n'è una sola alla volta
+    if (!h.spare && k.lapCount >= 1 && !k.finished) {
+      h.ctr = (h.ctr || 0) + DT * (k.lapCount === W.laps ? 2 : 1) * (k.slowmoT > 0 ? 0.5 : 1);
+      if (h.ctr >= COUNTER_SECS) { h.ctr = 0; h.spare = drawCard(); pushStatus(true); }
+    }
     // portali: passo sopra → chiedo una carta (decide il PC principale chi è arrivato prima)
     if (k.lapCount >= 1 && !k.finished) {
       track.portalFractions.forEach((f, pi) => {
@@ -1249,6 +1282,11 @@ function cardsStep(mine, now) {
       if (hitHazards.has(hz.id)) continue;
       if (hz.owner === k.slot && now - hz.born < 1.2) continue;
       if (Math.hypot(k.x - hz.x, k.z - hz.z) > 2.4 || k.air) continue;
+      if (hz.kind === 'card') {
+        // carta a terra: la raccolgo solo se ho posto in mano
+        if (h.cards.length < HAND_SIZE) { hitHazards.add(hz.id); toMaster({ t: 'card-pick', id: hz.id, slot: k.slot }); }
+        continue;
+      }
       hitHazards.add(hz.id);
       const r = receive(k, hz.kind);
       if (r === 'mirror') k.mirror = 0;
@@ -2290,7 +2328,7 @@ function advanceInner(frames, fps, drawAll) {
 }
 
 // solo per i test (pc.html?debug=1)
-if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, get track() { return track; }, mgStates, startPit, view, advance, switchTrack, startRace, finishRace, toLobby, modeTick };
+if (params.get('debug') === '1') window.__mck = { W, karts, hands, locals, addCard, useCard, dropCard, get track() { return track; }, mgStates, startPit, view, advance, switchTrack, startRace, finishRace, toLobby, modeTick };
 
 drawLobby();
 startNet();

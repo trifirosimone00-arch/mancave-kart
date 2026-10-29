@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { groundHeight, RAMP_LENGTH, obstaclesAt, locate, solidAt, loopPose } from './track.js';
 import { MT_BLUE, MT_ORANGE, MAX_SPEED } from './sim.js';
+import { CARDS } from './cards.js';
 import { LAMPO, LAMPO_MAX } from './minigames.js';
 import { buildMancave } from './render-mancave.js';
 import { buildMall } from './render-mall.js';
@@ -693,7 +694,10 @@ export function createRenderer(canvas, hudRoot, track) {
   let feedEl = null, feedSig = '';
 
   // oggetti delle carte sulla pista (olio, missili): li riuso
-  const pool = { oil: new Map(), missile: new Map() };
+  const pool = { oil: new Map(), missile: new Map(), cdrop: new Map() };
+  const cardDropGeo = new THREE.PlaneGeometry(2.2, 3.2);
+  const cardDrops = {};
+  const cardDropMat = (id) => cardDrops[id] || (cardDrops[id] = new THREE.MeshStandardMaterial({ color: CARDS[id] ? CARDS[id].color : '#ffffff', roughness: 0.4, emissive: CARDS[id] ? CARDS[id].color : '#ffffff', emissiveIntensity: 0.25, side: THREE.DoubleSide }));
   // pozza d'olio nera e lucida, dal bordo irregolare
   const oilGeo = (() => {
     const sh = new THREE.Shape();
@@ -969,8 +973,12 @@ export function createRenderer(canvas, hudRoot, track) {
       pm.card.rotation.y = tsec * 2.5;
       pm.glow.color.set(ready ? '#ffd400' : '#6b7080');
     });
-    syncPool('oil', snap.hazards, () => { const o = new THREE.Mesh(oilGeo, oilMat); o.rotation.x = -Math.PI / 2; return o; },
+    syncPool('oil', (snap.hazards || []).filter(h => h.kind !== 'card'), () => { const o = new THREE.Mesh(oilGeo, oilMat); o.rotation.x = -Math.PI / 2; return o; },
       (o, h) => o.position.set(h.x, groundAt(o, h.x, h.z) + 0.1, h.z));
+    // carte scartate: un cartoncino colorato a terra, che si raccoglie passandoci sopra
+    syncPool('cdrop', (snap.hazards || []).filter(h => h.kind === 'card'), (it) => {
+      const m = new THREE.Mesh(cardDropGeo, cardDropMat(it.card)); m.rotation.x = -Math.PI / 2; return m;
+    }, (o, h) => { o.position.set(h.x, groundAt(o, h.x, h.z) + 0.12, h.z); o.rotation.z = Math.sin(tsec * 2 + h.x) * 0.15; });
     syncPool('missile', snap.missiles, (it) => (it.kind === 'police' ? makePolice() : makeMissile()), (o, m) => {
       if (m.kind === 'police') {
         o.position.set(m.x, groundAt(o, m.x, m.z), m.z); o.rotation.y = m.yaw;

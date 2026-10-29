@@ -40,6 +40,8 @@ export const STREAK = 2;            // carte che si possono usare di fila senza 
 export const INCOMING = 1.5;        // un attacco arriva dopo 1,5 secondi: c'è il tempo di parare con lo Scudo
 export const PORTAL_COOLDOWN = 3;   // il portale si spegne dopo che qualcuno pesca
 export const PORTAL_FRACTIONS = [0.18, 0.47, 0.76]; // 3 portali per giro
+export const SPARE = HAND_SIZE;     // indice della carta a contatore: sta fuori dalla mano delle 3 carte
+export const COUNTER_SECS = 15;     // la carta a contatore si rigenera in 15 secondi (il doppio veloce nell'ultimo giro)
 
 // rarità: le rare escono poco
 const POOL = [

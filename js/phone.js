@@ -1,6 +1,6 @@
 // Telefono = volante. Manda sterzo e tasti allo schermo, riceve posizione, giri e vibrazioni.
 import { iceServers, PEER_PREFIX } from './net.js';
-import { CARDS, comboOf, HAND_SIZE } from './cards.js';
+import { CARDS, comboOf, HAND_SIZE, SPARE } from './cards.js';
 import { createMgPhone } from './mg-phone.js';
 import { PILOTS, PILOT_COLORS } from './pilots.js';
 const $ = (id) => document.getElementById(id);
@@ -432,7 +432,7 @@ function drawHand(s) {
   if (h.inc) hint.textContent = 'Attacco in arrivo: para con lo Scudo!';
   else if (h.cd > 0) hint.textContent = `Ricarica: ${Math.ceil(h.cd)} s`;
   else if (full) hint.textContent = 'Mano piena: usa una carta per pescarne altre';
-  else if (h.cards.length) hint.textContent = 'Tocca una carta per usarla';
+  else if (h.cards.length) hint.textContent = 'Tocca per usare · scorri giù per scartare';
   else hint.textContent = 'Passa sotto gli archi gialli per pescare carte';
   // tasto COMBO
   const combo = findCombo(h.cards);
@@ -441,14 +441,21 @@ function drawHand(s) {
   if (combo) { cb.querySelector('span').textContent = CARDS[combo.id].name; cb.dataset.a = combo.a; cb.dataset.b = combo.b; }
   if (picking && (cardId(picking.i) !== picking.id || s.phase !== 'race')) closePick();
   else if (picking) drawPick();
-  const sig = JSON.stringify(h.cards);
+  const pct = Math.round((h.spare ? 1 : (h.ctr || 0)) * 20);   // il contatore si ridisegna a passi del 5%
+  const sig = JSON.stringify([h.cards, h.spare || null, pct]);
   if (sig === handSig) return;
   handSig = sig;
   el.innerHTML = '';
-  for (let i = 0; i < Math.max(HAND_SIZE, h.cards.length); i++) {
-    const id = h.cards[i];
+  for (let i = 0; i <= SPARE; i++) {
+    const id = i === SPARE ? h.spare : h.cards[i];
     const c = document.createElement('button');
     c.type = 'button';
+    if (!id && i === SPARE) {
+      // carta a contatore ancora in ricarica: la barra si riempie
+      c.className = 'card ctr'; c.disabled = true;
+      c.innerHTML = '<span class="rar">ricarica</span><span class="nm">Extra</span><i style="width:' + pct * 5 + '%"></i>';
+      el.appendChild(c); continue;
+    }
     if (!id) { c.className = 'card empty'; c.disabled = true; el.appendChild(c); continue; }
     const def = CARDS[id];
     c.className = 'card ' + (def.rar === 'rara' ? 'rara' : def.rar === 'combo' ? 'combo' : '');
@@ -459,7 +466,21 @@ function drawHand(s) {
     c.querySelector('.nm').textContent = def.name;
     c.setAttribute('aria-label', `${def.name}: ${def.desc}`);
     // un tocco solo, appena il dito tocca la carta
-    c.addEventListener('pointerdown', (e) => { e.preventDefault(); c.classList.add('press'); setTimeout(() => c.classList.remove('press'), 150); play(i); });
+    // tocco = usa la carta; scorri in basso = scartala (solo dalle carte in mano, non dalla carta a contatore)
+    c.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); c.classList.add('press');
+      try { c.setPointerCapture(e.pointerId); } catch (err) { /* niente */ }
+      const x0 = e.clientX, y0 = e.clientY;
+      const cancel = () => { c.removeEventListener('pointerup', up); c.classList.remove('press'); };
+      const up = (ev) => {
+        c.removeEventListener('pointerup', up); c.removeEventListener('pointercancel', cancel);
+        c.classList.remove('press');
+        const dx = ev.clientX - x0, dy = ev.clientY - y0;
+        if (i < SPARE && dy > 40 && dy > Math.abs(dx) * 1.5) { dropCard(i); return; }
+        play(i);
+      };
+      c.addEventListener('pointerup', up); c.addEventListener('pointercancel', cancel);
+    });
     el.appendChild(c);
   }
 }
@@ -478,9 +499,14 @@ $('combo').addEventListener('pointerdown', (e) => {
   b.classList.add('hidden');
 });
 
-function cardId(i) { const h = (st.status && st.status.hand) || { cards: [] }; return h.cards[i]; }
+function cardId(i) { const h = (st.status && st.status.hand) || { cards: [] }; return i === SPARE ? (h.spare || undefined) : h.cards[i]; }
 function send2(msg) { if (conn && conn.open) { try { conn.send(msg); } catch (e) { /* niente */ } } }
 
+function dropCard(i) {
+  if (!cardId(i)) return;
+  send2({ t: 'drop', i });
+  if (navigator.vibrate) navigator.vibrate([20, 30, 20]);
+}
 function play(i) {
   const id = cardId(i);
   if (!id) return;
